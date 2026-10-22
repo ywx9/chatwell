@@ -5,3 +5,8 @@ debug/
 .runtime/
 .venv/
 .local-artifacts/
+
+.env
+.env.*
+!.env.example
+*.gguf

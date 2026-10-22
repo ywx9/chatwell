@@ -16,8 +16,10 @@ def now():
 
 
 def run(config, characters, client, output_dir, observer=None, *,
-        max_turns=DEFAULT_MAX_TURNS, recommendation_threshold=RECOMMENDATION_THRESHOLD):
+        max_turns=None, recommendation_threshold=RECOMMENDATION_THRESHOLD):
     validation.request(config, characters)
+    if max_turns is None:
+        max_turns = config.get('max_turns', DEFAULT_MAX_TURNS)
     if isinstance(max_turns, bool) or not isinstance(max_turns, int) or max_turns < 1:
         raise ValueError('max_turns must be a positive integer')
     if (isinstance(recommendation_threshold, bool) or not isinstance(recommendation_threshold, (int, float))
@@ -44,10 +46,11 @@ def run(config, characters, client, output_dir, observer=None, *,
     try:
         session['timestamps']['started'] = now()
         persist('Starting')
-        options = {'temperature': 0.8, 'max_tokens': 512, **config.get('llm_config', {})}
+        options = {'temperature': 0.8, 'max_tokens': getattr(client, 'default_max_tokens', 512), **config.get('llm_config', {})}
         names = [c['name'] for c in characters]
         data = {'situation': config['situation'], 'goal': config.get('goal'), 'language': config['language'],
-                'characters': [{k: c[k] for k in ('name', 'profile', 'relationships')} for c in characters]}
+                'characters': [{k: c[k] for k in ('name', 'profile', 'relationships')} for c in characters],
+                'coordinator': copy.deepcopy(config.get('coordinator', {}))}
         initial = client.complete(prompts.messages('coordinator', data), options, prompts.INITIAL_SCHEMA)
         conversation['pending_initialization'] = copy.deepcopy(initial)
         persist('Starting')
@@ -75,7 +78,7 @@ def run(config, characters, client, output_dir, observer=None, *,
             original = {'name': speaker['name'], **copy.deepcopy(generated)}
             data = {key: copy.deepcopy(conversation[key]) for key in
                     ('situation', 'goal', 'beginning_narration', 'non_participants')}
-            data.update(language=config['language'], characters=characters,
+            data.update(language=config['language'], coordinator=copy.deepcopy(config.get('coordinator', {})), characters=characters,
                         history=copy.deepcopy(conversation['turns']), character=original,
                         current_situation=conversation['turns'][-1]['current_situation'] if conversation['turns'] else conversation['situation'])
             revised = client.complete(prompts.messages('update', data), options, schema)
@@ -98,11 +101,41 @@ def run(config, characters, client, output_dir, observer=None, *,
                 speaker = select_speaker(characters, conversation['turns'], recommendation, recommendation_threshold)
         else:
             conversation['stop_reason'] = 'max_turns_reached'
-        session['timestamps']['ended'] = now()
-        persist('Ended')
+        # Record the completed conversation and its stop reason before closing generation.
+        persist('Running')
     except (Exception, KeyboardInterrupt) as error:
         conversation['stop_reason'] = 'user_interrupted' if isinstance(error, KeyboardInterrupt) else f'error: {type(error).__name__}: {error}'
         session['timestamps']['ended'] = now()
         persist('Failed')
         raise
+    # Closing prose is optional enrichment; failure must not discard a completed conversation.
+    data = {
+        'language': config['language'],
+        'coordinator': copy.deepcopy(config.get('coordinator', {})),
+        'characters': [{k: c[k] for k in ('name', 'profile')} for c in characters],
+        'situation': conversation['situation'],
+        'beginning_narration': conversation['beginning_narration'],
+        'non_participants': copy.deepcopy(conversation['non_participants']),
+        'history': [{'name': t['character']['name'], 'speech': t['character']['speech'],
+                     'expression': t['character']['expression'], 'narration': t['narration']}
+                    for t in conversation['turns']],
+        'current_situation': conversation['turns'][-1]['current_situation'],
+        'stop_reason': conversation['stop_reason'],
+    }
+    try:
+        closing = client.complete(prompts.messages('ending', data), options, prompts.ENDING_SCHEMA)
+        conversation['pending_ending'] = copy.deepcopy(closing)
+        persist('Running')
+        validation.ending(closing)
+        conversation['ending_narration'] = closing['ending_narration']
+        del conversation['pending_ending']
+    except (Exception, KeyboardInterrupt) as error:
+        conversation['ending_error'] = ('user_interrupted' if isinstance(error, KeyboardInterrupt)
+                                        else f'{type(error).__name__}: {error}')
+        logging.warning('Closing narration not generated: %s', conversation['ending_error'])
+        if isinstance(error, KeyboardInterrupt):
+            raise
+    finally:
+        session['timestamps']['ended'] = now()
+        persist('Ended')
     return path

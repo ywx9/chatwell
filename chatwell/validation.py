@@ -14,11 +14,19 @@ def keys(value, required, optional=()):
 
 
 def request(config, characters):
-    keys(config, ('language', 'situation'), ('goal', 'llm_config'))
+    keys(config, ('language', 'situation'), ('goal', 'llm_config', 'coordinator', 'max_turns'))
     for field in ('language', 'situation'):
         text(config[field], field)
     if 'goal' in config:
         text(config['goal'], 'goal')
+    if 'max_turns' in config:
+        value = config['max_turns']
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError('config.max_turns must be a positive integer')
+    coordinator = config.get('coordinator', {})
+    keys(coordinator, (), ('narration_style',))
+    if 'narration_style' in coordinator:
+        text(coordinator['narration_style'], 'coordinator.narration_style')
     options = config.get('llm_config', {})
     if not isinstance(options, dict):
         raise ValueError('llm_config must be an object')
@@ -90,3 +98,8 @@ def update(value):
     confidence = recommendation.get('confidence', 0)
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not math.isfinite(confidence) or not 0 <= confidence <= 1:
         raise ValueError('confidence must be a finite number in [0, 1]')
+
+
+def ending(value):
+    keys(value, ('ending_narration',))
+    text(value['ending_narration'], 'ending_narration')

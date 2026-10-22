@@ -56,7 +56,8 @@ class MultiTurnTests(unittest.TestCase):
         self.assertEqual(conversation['non_participants'], ['Charlie'])
         self.assertEqual(conversation['stop_reason'], 'goal_achieved')
         self.assertEqual([t['character']['name'] for t in conversation['turns']], ['Alice', 'Bob', 'Alice'])
-        self.assertEqual(len(client.calls), 7)  # init + exactly three character/update pairs
+        self.assertEqual(len(client.calls), 8)  # init + three character/update pairs + closing
+        self.assertTrue(conversation['ending_narration'])
         character_calls = [d for d, s in client.calls if s == prompts.TURN_SCHEMA]
         for index, data in enumerate(character_calls):
             encoded = json.dumps(data)

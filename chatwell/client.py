@@ -11,7 +11,7 @@ def reject_constant(value):
 
 
 class LocalClient:
-    def __init__(self, endpoint='http://127.0.0.1:8080', timeout=180, debug_dir=None):
+    def __init__(self, endpoint='http://127.0.0.1:8080', timeout=180, debug_dir=None, *, inference_options=None, default_max_tokens=512):
         parsed = urlsplit(endpoint)
         try:
             local = parsed.hostname == 'localhost' or ipaddress.ip_address(parsed.hostname).is_loopback
@@ -26,11 +26,15 @@ class LocalClient:
             self.url += '/v1'
         self.timeout = timeout
         self.debug_dir = Path(debug_dir) if debug_dir else None
+        self.inference_options = dict(inference_options or {})
+        self.default_max_tokens = default_max_tokens
         self.count = 0
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
 
     def complete(self, messages, options, schema=None):
-        payload = dict(options, messages=messages, stream=False)
+        payload = dict(options, **self.inference_options)
+        payload.setdefault('max_tokens', self.default_max_tokens)
+        payload.update(messages=messages, stream=False)
         if schema is not None:
             payload['response_format'] = {'type': 'json_schema', 'json_schema': {'name': 'chatwell', 'strict': True, 'schema': schema}}
         body = json.dumps(payload, allow_nan=False).encode('utf-8')
@@ -62,6 +66,8 @@ class MockClient:
         if schema is None:
             return 'Hello from the mock fixture.'
         data = json.loads(messages[-1]['content'])
+        if 'ending_narration' in schema['properties']:
+            return {'ending_narration': '窓辺の柔らかな光の中、二人を包む穏やかな時間が流れていた。'}
         if 'non_participants' in schema['properties']:
             participants = {c['name'] for c in data['characters']}
             absent = sorted({n for c in data['characters'] for n in c['relationships']} - participants)

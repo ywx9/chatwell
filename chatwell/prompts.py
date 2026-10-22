@@ -14,6 +14,12 @@ INITIAL_SCHEMA = {
     'required': ['situation', 'goal', 'non_participants', 'beginning_narration'],
     'additionalProperties': False,
 }
+ENDING_SCHEMA = {
+    'type': 'object',
+    'properties': {'ending_narration': {'type': 'string', 'minLength': 1}},
+    'required': ['ending_narration'],
+    'additionalProperties': False,
+}
 TURN_SCHEMA = {
     'type': 'object',
     'properties': {key: {'type': 'string'} for key in ('speech', 'thought', 'narration', 'expression')},

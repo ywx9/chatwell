@@ -2,20 +2,22 @@ import argparse
 import logging
 import os
 
+from . import __version__
 from .client import LocalClient, MockClient
 from .session import run
 from .storage import read_json
-from .speakers import DEFAULT_MAX_TURNS, RECOMMENDATION_THRESHOLD
+from .speakers import RECOMMENDATION_THRESHOLD
 
 
 def main():
     parser = argparse.ArgumentParser(description='CHATWELL local multi-turn prototype')
+    parser.add_argument('--version', action='version', version=f'CHATWELL {__version__}')
     parser.add_argument('--config', default='examples/config.json')
     parser.add_argument('--characters', nargs='+', default=['examples/alice.json', 'examples/bob.json'])
     parser.add_argument('--output-dir', default='sessions')
     parser.add_argument('--endpoint', default=os.environ.get('CHATWELL_ENDPOINT', 'http://127.0.0.1:8080'))
     parser.add_argument('--timeout', type=float, default=180)
-    parser.add_argument('--max-turns', type=int, default=DEFAULT_MAX_TURNS)
+    parser.add_argument('--max-turns', type=int, help='Override config.max_turns (default: 12 if omitted)')
     parser.add_argument('--recommendation-threshold', type=float, default=RECOMMENDATION_THRESHOLD)
     parser.add_argument('--debug-dir')
     parser.add_argument('--mock', action='store_true', help='Japanese fixture only; no inference')

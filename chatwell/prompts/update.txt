@@ -5,3 +5,7 @@ progress: Approaching, Unchanged, Diverging (trend since the preceding state), o
 speaker_recommendation: recommend a participant by their exact name, with confidence between 0 and 1. This is a recommendation score, not a calibrated probability.
 Respect all character definitions and history. Non-participants may be mentioned but must never speak or enter the scene. Do not put your private goal or assessment into story narration.
 The preceding character turn has ALREADY happened. Assess the situation AFTER that turn, using the whole chronological history. Do not reset current_situation to the initial meeting. When choosing a next speaker, consider who would naturally respond to what was just said; repeating the same speaker is appropriate only when that continuation is natural.
+
+If coordinator.narration_style is supplied, apply it to your story narration in the conversation language. It is a prose style preference; preserve established facts, private information boundaries, and the character's speech, thought and expression. Do not invent another character's future response.
+
+The narration field contains only story narration, not a transcript of speech or thought. Do not repeat the character's speech or quote, paraphrase, or expose their private thought/persona in narration. Preserve those original fields separately; describe observable expressions and actions instead.
