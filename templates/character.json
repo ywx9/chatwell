@@ -1,0 +1,15 @@
+{
+  "name": "Their name",
+  "profile": "Their personality as perceived by others",
+  "persona": "Their self-perception",
+  "speech": {
+    "first_person": "How they refer to themself",
+    "second_person": "How they address people whose names they don't know",
+    "default_address": "How they address people whose names they know",
+    "style": "Their general style of speaking"
+  },
+  "relationships": {
+    "name_of_first_one": "Their relationship with this person and how they address them",
+    "and so on": "You can add more relationships in the same format"
+  }
+}

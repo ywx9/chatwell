@@ -1,0 +1,8 @@
+{
+  "language": "The language used in the conversation. On the other hand, the coordinator always uses English.",
+  "situation": "The situation at the beginning of the conversation",
+  "goal": "The desired goal at the end of the conversation (optional)",
+  "llm_config": {
+    "_": "You can add configuration settings (ex. temperature) passed to the language model (optional)"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "language": "Japanese",
+  "situation": "Alice and Bob meet in a quiet cafe after class.",
+  "goal": "They feel more comfortable talking to each other.",
+  "llm_config": {"temperature": 0.8, "max_tokens": 512}
+}

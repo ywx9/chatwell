@@ -1,0 +1,12 @@
+{
+  "id": "Unique identifier of the conversation",
+  "status": "Queued/Starting/Running/Ended/Failed",
+  "timestamps": {
+    "queued": "The timestamp when the conversation was queued",
+    "started": "The timestamp when the conversation started",
+    "ended": "The timestamp when the conversation ended"
+  },
+  "config": "config.json",
+  "characters": "list of character.json",
+  "conversation": "conversation.json"
+}

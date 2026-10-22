@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+sessions/
+debug/
+.runtime/
+.venv/
+.local-artifacts/

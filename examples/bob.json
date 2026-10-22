@@ -1,0 +1,12 @@
+{
+  "name": "Bob",
+  "profile": "A friendly and talkative classmate.",
+  "persona": "I enjoy meeting people and putting them at ease.",
+  "speech": {
+    "first_person": "僕",
+    "second_person": "君",
+    "default_address": "Given name + さん",
+    "style": "Casual but considerate Japanese"
+  },
+  "relationships": {"Alice": "A classmate; I call her Aliceさん.", "Charlie": "An older friend who is not present."}
+}

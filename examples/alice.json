@@ -1,0 +1,12 @@
+{
+  "name": "Alice",
+  "profile": "A reserved student who appears calm to others.",
+  "persona": "I am curious and somewhat shy.",
+  "speech": {
+    "first_person": "私",
+    "second_person": "あなた",
+    "default_address": "Name + さん",
+    "style": "Polite and gentle Japanese"
+  },
+  "relationships": {"Bob": "A classmate I respect; I call him Bobさん."}
+}
