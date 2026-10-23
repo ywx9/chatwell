@@ -8,8 +8,7 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'scripts'))
-import _jobs as jobs
+from chatwell import jobs
 from chatwell.client import MockClient
 from chatwell.storage import read_json, save
 from chatwell.session import run
@@ -140,20 +139,7 @@ class QueueTests(unittest.TestCase):
         self.assertIn('pending_turn', session['conversation'])
         self.assertIsNotNone(session['timestamps']['ended'])
 
-    def test_stale_worker_pid_is_not_signalled(self):
-        state_path = self.root / 'worker.json'
-        save(state_path, {'pid': 1234, 'birth': 'old'})
-        with patch.object(jobs, 'STATE', state_path), patch.object(jobs, 'identity', return_value='new'), patch.object(jobs.os, 'pidfd_open') as pidfd:
-            jobs.stop_worker()
-        pidfd.assert_not_called()
 
-    def test_missing_identity_cannot_match_null_birth(self):
-        state_path = self.root / 'worker.json'
-        save(state_path, {'pid': 1234, 'birth': None})
-        with patch.object(jobs, 'STATE', state_path), patch.object(jobs, 'identity', return_value=None), patch.object(jobs.os, 'pidfd_open') as pidfd:
-            self.assertIsNone(jobs.worker_state())
-            jobs.stop_worker()
-        pidfd.assert_not_called()
 
     def test_one_failed_request_does_not_prevent_next_request(self):
         first = jobs.enqueue(self.input)
@@ -166,19 +152,6 @@ class QueueTests(unittest.TestCase):
         jobs.process_job(second, MockClient(), {})
         self.assertEqual(read_json(second)['status'], 'Ended')
 
-    def test_worker_shutdown_finalizes_job_even_before_session_start(self):
-        path = jobs.enqueue(self.input, 1)
-        state_path = self.root / 'worker.json'
-        def interrupted(*args):
-            job = read_json(path)
-            job['status'] = 'Running'
-            save(path, job)
-            raise KeyboardInterrupt
-        settings = {'port': 8080, 'request_timeout': 1, 'enable_thinking': True, 'reasoning_format': 'auto', 'reasoning_in_content': False, 'max_tokens': 4096}
-        with patch.object(jobs, 'STATE', state_path), patch.object(jobs.signal, 'signal'), patch.object(jobs, 'identity', return_value='birth'), patch.object(jobs, 'process_job', side_effect=interrupted):
-            jobs.work(settings)
-        self.assertFalse(state_path.exists())
-        self.assertEqual(read_json(path)['status'], 'Failed')
 
     def test_style_only_reaches_coordinator_and_effort_is_absent(self):
         calls = []

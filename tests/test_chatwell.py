@@ -19,8 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class SessionTests(unittest.TestCase):
     def setUp(self):
-        self.config = read_json(ROOT / 'examples/config.json')
-        self.characters = [read_json(ROOT / 'examples' / f'{n}.json') for n in ('alice', 'bob')]
+        self.config = read_json(ROOT / 'tests/fixtures/examples/config.json')
+        self.characters = [read_json(ROOT / 'tests/fixtures/examples' / f'{n}.json') for n in ('alice', 'bob')]
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
 
@@ -42,9 +42,9 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(states[:3], ['Queued', 'Starting', 'Starting'])
         self.assertTrue(all(state == 'Running' for state in states[3:-1]))
         self.assertEqual(states[-1], 'Ended')
-        self.assertEqual(set(result), set(read_json(ROOT / 'templates/chatwell.json')))
-        self.assertEqual(set(result['config']), set(read_json(ROOT / 'templates/config.json')))
-        self.assertEqual(set(result['conversation']), set(read_json(ROOT / 'templates/conversation.json')))
+        self.assertEqual(set(result), set(read_json(ROOT / 'tests/fixtures/templates/chatwell.json')))
+        self.assertEqual(set(result['config']), set(read_json(ROOT / 'tests/fixtures/templates/config.json')))
+        self.assertEqual(set(result['conversation']), set(read_json(ROOT / 'tests/fixtures/templates/conversation.json')))
         self.assertEqual(result['conversation']['turns'][0]['character']['name'], 'Alice')
         self.assertIn('ですね', result['conversation']['turns'][0]['character']['speech'])
         self.assertEqual(inputs[1]['non_participants'], ['Charlie'])
@@ -112,7 +112,7 @@ class TransportTests(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as directory:
                 with self.assertRaises(TimeoutError):
-                    run(read_json(ROOT / 'examples/config.json'), [read_json(ROOT / 'examples/alice.json')],
+                    run(read_json(ROOT / 'tests/fixtures/examples/config.json'), [read_json(ROOT / 'tests/fixtures/examples/alice.json')],
                         LocalClient(f'http://127.0.0.1:{server.server_port}', timeout=0.05), directory)
                 result = read_json(next(Path(directory).glob('*.json')))
                 self.assertEqual(result['status'], 'Failed')
@@ -127,8 +127,8 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(MockClient().complete([{'role': 'user', 'content': 'Hello'}], {}),
                          'Hello from the mock fixture.')
 
-    def test_local_endpoint_only(self):
-        for url in ('https://example.com', 'http://192.168.1.2', 'http://127.0.0.1@evil.test', 'http://localhost?x=y'):
+    def test_endpoint_validation(self):
+        for url in ('ftp://example.com', 'http://', 'http://127.0.0.1@evil.test', 'http://localhost?x=y', 'http://localhost:bad'):
             with self.assertRaises(ValueError):
                 LocalClient(url)
 
@@ -172,7 +172,7 @@ class TransportTests(unittest.TestCase):
             port = sock.getsockname()[1]
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(OSError):
-                run(read_json(ROOT / 'examples/config.json'), [read_json(ROOT / 'examples/alice.json')],
+                run(read_json(ROOT / 'tests/fixtures/examples/config.json'), [read_json(ROOT / 'tests/fixtures/examples/alice.json')],
                     LocalClient(f'http://127.0.0.1:{port}', timeout=0.5), directory)
             self.assertEqual(read_json(next(Path(directory).glob('*.json')))['status'], 'Failed')
 

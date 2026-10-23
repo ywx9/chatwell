@@ -10,15 +10,18 @@ def reject_constant(value):
     raise ValueError(f'Invalid JSON constant: {value}')
 
 
-class LocalClient:
-    def __init__(self, endpoint='http://127.0.0.1:8080', timeout=180, debug_dir=None, *, inference_options=None, default_max_tokens=512):
+class LlamaClient:
+    def __init__(self, endpoint='http://127.0.0.1:8080', timeout=180, debug_dir=None, *, inference_options=None, default_max_tokens=6144, api_key=None, model=None):
         parsed = urlsplit(endpoint)
+        if (parsed.scheme not in ('http', 'https') or not parsed.hostname
+                or parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment):
+            raise ValueError('Endpoint must be an HTTP(S) URL without credentials, query or fragment')
         try:
-            local = parsed.hostname == 'localhost' or ipaddress.ip_address(parsed.hostname).is_loopback
+            parsed.port
         except ValueError:
-            local = False
-        if not local or parsed.scheme != 'http' or parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError('Endpoint must be a loopback HTTP URL')
+            raise ValueError('Endpoint has an invalid port') from None
+        if api_key and any(c in api_key for c in '\r\n'):
+            raise ValueError('Invalid API key format')
         if not math.isfinite(timeout) or timeout <= 0:
             raise ValueError('Timeout must be positive and finite')
         self.url = endpoint.rstrip('/')
@@ -28,8 +31,16 @@ class LocalClient:
         self.debug_dir = Path(debug_dir) if debug_dir else None
         self.inference_options = dict(inference_options or {})
         self.default_max_tokens = default_max_tokens
+        self.api_key = api_key
+        self.model = model
         self.count = 0
-        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+        try:
+            loopback = parsed.hostname == 'localhost' or ipaddress.ip_address(parsed.hostname).is_loopback
+        except ValueError:
+            loopback = False
+        # Keep localhost direct; remote servers may require the user's proxy configuration.
+        proxy = urllib.request.ProxyHandler({}) if loopback else urllib.request.ProxyHandler()
+        self.opener = urllib.request.build_opener(proxy, NoRedirect())
 
     def complete(self, messages, options, schema=None):
         payload = dict(options, **self.inference_options)
@@ -37,8 +48,12 @@ class LocalClient:
         payload.update(messages=messages, stream=False)
         if schema is not None:
             payload['response_format'] = {'type': 'json_schema', 'json_schema': {'name': 'chatwell', 'strict': True, 'schema': schema}}
+        if self.model:
+            payload['model'] = self.model
         body = json.dumps(payload, allow_nan=False).encode('utf-8')
         request = urllib.request.Request(self.url + '/chat/completions', body, {'Content-Type': 'application/json'})
+        if self.api_key:
+            request.add_header('Authorization', 'Bearer ' + self.api_key)
         with self.opener.open(request, timeout=self.timeout) as response:
             raw = response.read().decode('utf-8')
         if self.debug_dir:
@@ -46,10 +61,14 @@ class LocalClient:
             self.count += 1
             (self.debug_dir / f'response-{self.count:03d}.json').write_text(raw, encoding='utf-8')
         result = json.loads(raw, parse_constant=reject_constant)
-        choice = result['choices'][0]
-        if choice.get('finish_reason') == 'length':
+        try:
+            choice = result['choices'][0]
+            content = choice['message']['content']
+            finish_reason = choice.get('finish_reason')
+        except (KeyError, IndexError, TypeError, AttributeError):
+            raise ValueError('Invalid chat/completions response: missing choice/message/content') from None
+        if finish_reason == 'length':
             raise ValueError('Model response exceeded max_tokens')
-        content = choice['message']['content']
         if not isinstance(content, str) or not content.strip():
             raise ValueError('Empty model response')
         return json.loads(content, parse_constant=reject_constant) if schema is not None else content
@@ -86,3 +105,6 @@ class MockClient:
         if schema:
             return {'speech': '今日は静かですね。', 'thought': '少し緊張するな。', 'narration': '窓の外に目を向けた。', 'expression': '控えめな笑顔'}
         return 'Hello from the mock fixture.'
+
+
+LocalClient = LlamaClient

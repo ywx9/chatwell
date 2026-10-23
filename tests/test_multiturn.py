@@ -36,9 +36,9 @@ class RecordingClient(MockClient):
 
 class MultiTurnTests(unittest.TestCase):
     def setUp(self):
-        self.config = read_json(ROOT / 'examples/config.json')
+        self.config = read_json(ROOT / 'tests/fixtures/examples/config.json')
         self.config['goal'] = 'ORIGINAL_GOAL_SECRET'
-        self.characters = [read_json(ROOT / 'examples' / f'{n}.json') for n in ('alice', 'bob')]
+        self.characters = [read_json(ROOT / 'tests/fixtures/examples' / f'{n}.json') for n in ('alice', 'bob')]
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
 

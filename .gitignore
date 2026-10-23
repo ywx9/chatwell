@@ -10,3 +10,7 @@ debug/
 .env.*
 !.env.example
 *.gguf
+
+build/
+dist/
+*.egg-info/

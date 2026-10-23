@@ -11,8 +11,7 @@ from chatwell.session import run
 from chatwell.storage import read_json, save
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'scripts'))
-import _jobs as jobs
+from chatwell import jobs
 from unittest.mock import patch
 
 
