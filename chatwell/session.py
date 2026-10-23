@@ -1,14 +1,16 @@
 import copy
 import logging
 import math
-import uuid
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import prompts, validation
 from .history import character_input
 from .speakers import DEFAULT_MAX_TURNS, RECOMMENDATION_THRESHOLD, select_speaker
-from .storage import save
+from .storage import save, read_json
+from .records import new_session, encode, model_id
+from .client import MockClient
 
 
 def now():
@@ -16,7 +18,7 @@ def now():
 
 
 def run(config, characters, client, output_dir, observer=None, *,
-        max_turns=None, recommendation_threshold=RECOMMENDATION_THRESHOLD):
+        max_turns=None, recommendation_threshold=RECOMMENDATION_THRESHOLD, session_path=None):
     validation.request(config, characters)
     if max_turns is None:
         max_turns = config.get('max_turns', DEFAULT_MAX_TURNS)
@@ -28,30 +30,67 @@ def run(config, characters, client, output_dir, observer=None, *,
     config, characters = copy.deepcopy(config), copy.deepcopy(characters)
     conversation = {'situation': '', 'goal': '', 'non_participants': [], 'beginning_narration': '',
                     'turns': [], 'ending_narration': '', 'stop_reason': ''}
-    session = {
-        'id': str(uuid.uuid4()), 'status': 'Queued',
-        'timestamps': {'queued': now(), 'started': None, 'ended': None},
-        'config': config, 'characters': characters, 'conversation': conversation,
-    }
-    path = Path(output_dir) / (session['id'] + '.json')
+    path = Path(session_path) if session_path else new_session(config, characters, output_dir, max_turns)
+    session = read_json(path)
+    if session['status'] != 'Queued':
+        raise ValueError('Only a queued session can be started')
+    session['conversation'] = conversation
+    calls = {}
+    options = {'temperature': 0.8, 'max_tokens': getattr(client, 'default_max_tokens', 6144), **config.get('llm_config', {})}
+    session['runtime'] = {'max_turns': max_turns, 'recommendation_threshold': recommendation_threshold,
+                          'llm_config': options, 'inference_options': getattr(client, 'inference_options', {}),
+                          'request_timeout': getattr(client, 'timeout', None),
+                          'mode': 'mock' if isinstance(client, MockClient) else 'model',
+                          'server': copy.deepcopy(getattr(client, 'provenance', {'management': 'external', 'llama_cpp_version': None,
+                                                                              'model_file': None, 'model_sha256': None})),
+                          'requested_model': model_id(getattr(client, 'model', None)), 'response_model': None}
 
     def persist(status):
         session['status'] = status
-        save(path, session)
+        session['timestamps']['updated'] = now()
+        session['progress']['completed_turns'] = len(conversation['turns'])
+        if status in ('Ended', 'Failed'):
+            session['progress']['phase'] = status.lower()
+        save(path, encode(session, calls))
         logging.info('%s turns=%d %s', status, len(conversation['turns']), path)
         if observer:
             observer(path)
+
+    def complete(kind, messages, schema, name=None):
+        phase = kind.split(':')[0]
+        session['progress']['phase'] = {'character': 'generating_character', 'coordinator': 'updating_coordinator'}.get(phase, phase)
+        record = {'output': None, 'metrics': {'started': now(), 'ended': None, 'duration_ms': None,
+                                             'prompt_tokens': None, 'completion_tokens': None, 'finish_reason': None}}
+        calls[kind] = record
+        persist('Starting' if kind == 'initializing' else 'Running')
+        started = time.monotonic()
+        client.last_metrics = {}
+        client.response_model = None
+        try:
+            output = client.complete(messages, options, schema)
+            record['output'] = {'name': name, **output} if name and isinstance(output, dict) else copy.deepcopy(output)
+            return output
+        except (Exception, KeyboardInterrupt) as error:
+            record['error'] = 'interrupted' if isinstance(error, KeyboardInterrupt) else type(error).__name__
+            raise
+        finally:
+            record['metrics'].update(getattr(client, 'last_metrics', {}))
+            record['metrics'].update(ended=now(), duration_ms=round((time.monotonic() - started) * 1000, 3))
+            record['model'] = model_id(getattr(client, 'response_model', None))
+            session['runtime']['response_model'] = record['model']
+            persist('Starting' if kind == 'initializing' else 'Running')
 
     persist('Queued')
     try:
         session['timestamps']['started'] = now()
         persist('Starting')
-        options = {'temperature': 0.8, 'max_tokens': getattr(client, 'default_max_tokens', 512), **config.get('llm_config', {})}
+        if hasattr(client, 'probe_metadata'):
+            session['runtime']['server'] = client.probe_metadata()
         names = [c['name'] for c in characters]
         data = {'situation': config['situation'], 'goal': config.get('goal'), 'language': config['language'],
                 'characters': [{k: c[k] for k in ('name', 'profile', 'relationships')} for c in characters],
                 'coordinator': copy.deepcopy(config.get('coordinator', {}))}
-        initial = client.complete(prompts.messages('coordinator', data), options, prompts.INITIAL_SCHEMA)
+        initial = complete('initializing', prompts.messages('coordinator', data), prompts.INITIAL_SCHEMA)
         conversation['pending_initialization'] = copy.deepcopy(initial)
         persist('Starting')
         validation.initialization(initial)
@@ -64,13 +103,14 @@ def run(config, characters, client, output_dir, observer=None, *,
         conversation.update(copy.deepcopy(initial))
         conversation['non_participants'] = sorted(set(initial['non_participants']) |
                                                 ({n for c in characters for n in c['relationships']} - set(names)))
+        calls['initializing']['output'] = {key: copy.deepcopy(conversation[key]) for key in ('situation', 'goal', 'non_participants', 'beginning_narration')}
         del conversation['pending_initialization']
         persist('Running')
         speaker = characters[0]
         schema = prompts.update_schema(names)
-        for _ in range(max_turns):
+        for index in range(max_turns):
             data = character_input(conversation, speaker, characters, config['language'])
-            generated = client.complete(prompts.messages('character', data), options, prompts.TURN_SCHEMA)
+            generated = complete(f'character:{index}', prompts.messages('character', data), prompts.TURN_SCHEMA, speaker['name'])
             # Persist received output before validation or the next API call.
             conversation['pending_turn'] = {'name': speaker['name'], 'character': copy.deepcopy(generated)}
             persist('Running')
@@ -81,7 +121,7 @@ def run(config, characters, client, output_dir, observer=None, *,
             data.update(language=config['language'], coordinator=copy.deepcopy(config.get('coordinator', {})), characters=characters,
                         history=copy.deepcopy(conversation['turns']), character=original,
                         current_situation=conversation['turns'][-1]['current_situation'] if conversation['turns'] else conversation['situation'])
-            revised = client.complete(prompts.messages('update', data), options, schema)
+            revised = complete(f'coordinator:{index}', prompts.messages('update', data), schema)
             conversation['pending_turn']['coordinator'] = copy.deepcopy(revised)
             persist('Running')
             validation.update(revised)
@@ -90,6 +130,7 @@ def run(config, characters, client, output_dir, observer=None, *,
             recommendation = revised.setdefault('speaker_recommendation', {})
             recommendation.setdefault('name', '')
             recommendation.setdefault('confidence', 0.0)
+            calls[f'coordinator:{index}']['output'] = copy.deepcopy(revised)
             conversation['turns'].append({'character': original, **revised})
             del conversation['pending_turn']
             persist('Running')
@@ -123,7 +164,7 @@ def run(config, characters, client, output_dir, observer=None, *,
         'stop_reason': conversation['stop_reason'],
     }
     try:
-        closing = client.complete(prompts.messages('ending', data), options, prompts.ENDING_SCHEMA)
+        closing = complete('generating_ending', prompts.messages('ending', data), prompts.ENDING_SCHEMA)
         conversation['pending_ending'] = copy.deepcopy(closing)
         persist('Running')
         validation.ending(closing)
@@ -132,6 +173,7 @@ def run(config, characters, client, output_dir, observer=None, *,
     except (Exception, KeyboardInterrupt) as error:
         conversation['ending_error'] = ('user_interrupted' if isinstance(error, KeyboardInterrupt)
                                         else f'{type(error).__name__}: {error}')
+        calls['generating_ending']['error'] = conversation['ending_error']
         logging.warning('Closing narration not generated: %s', conversation['ending_error'])
         if isinstance(error, KeyboardInterrupt):
             raise

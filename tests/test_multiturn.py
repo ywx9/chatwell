@@ -10,7 +10,7 @@ from chatwell.client import MockClient
 from chatwell.history import character_history
 from chatwell.session import run
 from chatwell.speakers import select_speaker
-from chatwell.storage import read_json
+from session_view import read_json
 
 ROOT = Path(__file__).resolve().parents[1]
 

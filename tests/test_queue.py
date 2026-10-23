@@ -10,7 +10,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 from chatwell import jobs
 from chatwell.client import MockClient
-from chatwell.storage import read_json, save
+from chatwell.storage import save
+from session_view import read_json
 from chatwell.session import run
 
 

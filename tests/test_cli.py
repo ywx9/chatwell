@@ -31,9 +31,11 @@ class CliTests(unittest.TestCase):
             result = read_json(output.getvalue().strip())
             self.assertEqual(len(result['conversation']['turns']), 2)
             self.assertEqual(result['status'], 'Ended')
-            with redirect_stdout(io.StringIO()):
+            settings_path = Path(directory) / '.env'
+            settings_path.write_text('SELF_MANAGED_LLAMA=false\n')
+            with redirect_stdout(io.StringIO()), patch('chatwell.tooling.ensure_worker'):
                 self.assertEqual(main(['enqueue', '--input', str(ROOT / 'samples/input.json'),
-                                       '--max-turns', '2', '--data-dir', directory]), 0)
+                                       '--max-turns', '2', '--data-dir', directory, '--mock', '--settings', str(settings_path)]), 0)
                 self.assertEqual(main(['worker', '--mock', '--once', '--data-dir', directory]), 0)
             job = read_json(next((Path(directory) / '.runtime/queue').glob('*.json')))
             self.assertEqual(job['status'], 'Ended')

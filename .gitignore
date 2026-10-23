@@ -14,3 +14,6 @@ debug/
 build/
 dist/
 *.egg-info/
+
+llama/
+llm/

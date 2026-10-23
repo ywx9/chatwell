@@ -1,40 +1,54 @@
-# 入出力仕様（v0.3.0）
+# 入出力仕様（v0.3.1）
 
-`samples/input.json` が直接実行・キュー登録の共通入力です。トップレベルは `config` と `characters` のみです。文字列の必須項目は空白だけにできません。未知のキーは拒否します。
+## 入力
 
-## config
+`samples/input.json` が共通入力です。トップレベルは `config` と `characters`。未知のキーは拒否します。
 
-| キー | 内容 |
-|---|---|
-| language | 必須。生成言語 |
-| situation | 必須。開始時の状況 |
-| goal | 任意。会話の目標。Coordinatorだけに渡す |
-| max_turns | 任意。1以上の整数。既定12。CLIで上書き可能 |
-| llm_config | 任意。以下の生成設定 |
-| coordinator | 任意。`narration_style` で描写方針を指定 |
+`config` は必須の `language/situation` と、任意の `goal/max_turns/llm_config/coordinator` を持ちます。max_turnsは1以上の整数で、CLI → 入力 → 既定12の順です。goalはCoordinatorだけに渡します。
 
-`llm_config` の対応項目は `temperature/max_tokens/top_p/top_k/min_p/seed/repeat_penalty` です。temperatureの既定は0.8、max_tokensの既定は共通設定の6144です。入力でのmax_tokens指定は共通設定より優先します。
+`llm_config` は `temperature/max_tokens/top_p/top_k/min_p/seed/repeat_penalty`。temperatureの既定は0.8、max_tokensの既定は共通設定の6144で、入力指定が優先します。`coordinator.narration_style` は描写方針です。
 
-## characters
+`characters` は1人以上で、各人物は `name/profile/persona/speech/relationships` を持ちます。speechは `first_person/second_person/default_address/style`、relationshipsは人物名→関係の説明です。人物名は重複できず、先頭の人物が最初に話します。
 
-1人以上の人物を配列で指定します。先頭が最初に発言します。人物名は重複できません。
+## セッションJSON（schema_version: 1.0）
 
-| キー | 内容 |
-|---|---|
-| name | 人物名 |
-| profile | 公開プロフィール |
-| persona | 本人にのみ渡す内面設定 |
-| speech | `first_person/second_person/default_address/style` を持つオブジェクト |
-| relationships | 相手の名前をキー、関係の説明を値とするオブジェクト。空でも可 |
+- `schema_version`: 保存形式のバージョン。Chatwellのバージョンとは別管理。
+- `chatwell_version`: 生成に使ったアプリのバージョン。
+- `id/status/timestamps`: 識別子、状態、queued/started/updated/ended時刻。時刻はUTCオフセット付きISO 8601。
+- `progress`: phaseとcompleted_turns。phaseはqueued/initializing/generating_character/updating_coordinator/generating_ending/ended/failed。
+- `config/characters`: 登録時の入力を保持。
+- `runtime`: 実効max_turns、生成・思考設定、リクエスト待機上限、話者選択閾値、実モデル／モックの別、要求モデルID、応答モデルID、取得可能なサーバー・モデルの識別情報。
+- `conversation`: 以下の構造。
 
-## セッションJSON
+```json
+{
+  "initialization": {"output": {}, "metrics": {}},
+  "turns": [
+    {
+      "index": 0,
+      "character": {"output": {}, "metrics": {}},
+      "coordinator": {"output": {}, "metrics": {}}
+    }
+  ],
+  "ending": {"output": {}, "metrics": {}},
+  "stop_reason": "max_turns_reached"
+}
+```
 
-トップレベルは `id/status/timestamps/config/characters/conversation` です。状態は `Queued → Starting → Running → Ended` と進み、本体の失敗・中断は `Failed` になります。保存は一時ファイルへの書込・fsync後のatomic replaceです。
+未実行のinitialization/endingはnull。実行中のoutputはnull。各呼出しのmetricsは `started/ended/duration_ms/prompt_tokens/completion_tokens/finish_reason`。所要時間は単調時計で計測し、サーバーから得られないトークン数等はnullにします。各呼出しは応答のモデルIDが取得できれば `model` も記録します。API失敗時も時間とエラー種別を残します。
 
-`conversation` には開始状況、目標、非参加者、`beginning_narration`、`turns`、`ending_narration`、`stop_reason` を保存します。各ターンにはCharacter生成の `speech/thought/narration/expression` と、Coordinatorの確定した地の文・最新状況・進捗・次話者推薦を保存します。
+initialization.outputは `situation/goal/non_participants/beginning_narration`。非参加者は入力の関係情報も使って補完します。
 
-通常、Nターンで初期化1回 + Character/Coordinator各N回 + 締め1回の `2N + 2` 回生成します。目標達成時は `goal_achieved`、上限時は `max_turns_reached` です。締めだけ失敗した場合は会話本体を `Ended` のまま保持し、`ending_error` を追加します。不正な受信結果や未完了のターンは `pending_ending` / `pending_turn` 等で保持する場合があります。
+character.outputは `name/speech/thought/narration/expression`。nameはアプリが補います。
 
-キャラクターには他者のthought・persona、goal、進捗評価、次話者推薦を渡しません。自分のthoughtは保持し、過去の地の文はCoordinatorの確定版を使います。自由文経由の意味上の漏洩を完全に検出する仕組みではありません。
+coordinator.outputは `narration/current_situation/progress/progress_reason/speaker_recommendation`。省略された推薦は空名・confidence 0に補完します。推薦が有効かつconfidence 0.7以上なら採用し、それ以外は発言回数が少ない人物、同数なら入力順です。
 
-次話者推薦は有効な名前かつconfidence 0.7以上で採用し、それ以外は確定済み発言回数が少ない人物、同数なら入力配列順です。既存のセッションは移行・書換えを行いません。
+ending.outputは `ending_narration`。正常終了時には通常Nターンで `2N+2` 回の生成を行います。
+
+状態はQueued → Starting → Running → Ended、本体の失敗・中断はFailedです。目標達成時はgoal_achieved、上限時はmax_turns_reached。締めだけの失敗はEndedとending_errorを残します。不正な受信結果や未完了処理はpending_initialization/pending_turn/pending_ending等に保存します。pending_turnもindexと各呼出しのoutput/metricsを持ちます。締めが未成功の場合、ending.outputに不正な受信結果が残っていることがあるため、statusだけでなくending_errorも確認してください。
+
+保存は一時ファイルへの書込・fsync後のatomic replaceです。ファイル名はUTCの `yyyymmdd-hhmmss-ミリ秒Z-ランダムID.json`。旧セッションを自動移行・書換えしません。statusツールでは旧形式の状態確認も可能ですが、旧ファイルには新しい進捗・実効設定・メトリクスがありません。
+
+モデル情報は要求aliasとサーバーが返すIDを区別します。self-managed-llamaではGGUFのbasename、SHA-256、実行ファイルのversionを取得し、取得元を記録します。外部サーバーでは任意の/propsが返すbuild_infoをバージョンとして取得し、未対応・取得不能ならnullにします。取得元はserver_propsです。共有メタデータに認証情報・内部URL・モデルの絶対パスは保存しません。
+
+キャラクターには他者のthought/persona、goal、進捗、話者推薦を渡しません。自分のthoughtは保持し、履歴の地の文はCoordinatorの確定版を使います。自由文経由の意味上の漏洩を完全検出する仕組みではありません。

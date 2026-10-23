@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from . import validation
 from .speakers import DEFAULT_MAX_TURNS
 from .storage import read_json, save
+from .records import new_session
 
 ROOT = Path.cwd()
 QUEUE = ROOT / '.runtime' / 'queue'
@@ -28,6 +29,7 @@ def enqueue(path, max_turns=None):
     job = {'id': job_id, 'status': 'Queued', 'queued': timestamp(), 'started': None,
            'ended': None, 'input_path': str(Path(path).resolve()), 'input': data,
            'max_turns': max_turns, 'session_path': None, 'error': None}
+    job['session_path'] = str(new_session(data['config'], data['characters'], ROOT / 'sessions', max_turns).resolve())
     target = QUEUE / f'{job_id}.json'
     save(target, job)
     return target
@@ -50,7 +52,7 @@ def process_job(path, client, settings, runner=None):
 
     try:
         result = runner(job['input']['config'], job['input']['characters'], client,
-                        ROOT / 'sessions', observer=observe, max_turns=job['max_turns'])
+                        ROOT / 'sessions', observer=observe, max_turns=job['max_turns'], session_path=job.get('session_path'))
         job.update(status='Ended', session_path=str(result.resolve()))
     except (Exception, KeyboardInterrupt) as error:
         job.update(status='Failed', error='処理を中断しました。' if isinstance(error, KeyboardInterrupt) else f'{type(error).__name__}: {error}')
@@ -61,6 +63,14 @@ def process_job(path, client, settings, runner=None):
             raise
     finally:
         job['ended'] = timestamp()
+        if job.get('session_path'):
+            session = read_json(job['session_path'])
+            if session['status'] not in ('Ended', 'Failed'):
+                session['status'] = 'Failed'
+                session['timestamps'].update(ended=job['ended'], updated=job['ended'])
+                session['progress'] = {'phase': 'failed', 'completed_turns': len(session['conversation']['turns'])}
+                session['conversation']['stop_reason'] = job.get('error') or 'worker_interrupted'
+                save(job['session_path'], session)
         save(path, job)
 
 
@@ -80,6 +90,9 @@ def recover():
                                          and bool(conversation.get('turns')) and 'pending_turn' not in conversation)
                         session['status'] = 'Ended' if body_complete else 'Failed'
                         session['timestamps']['ended'] = job['ended']
+                        if 'progress' in session:
+                            session['timestamps']['updated'] = job['ended']
+                            session['progress']['phase'] = session['status'].lower()
                         if body_complete:
                             conversation['ending_error'] = 'worker_interrupted'
                             job.update(status='Ended', error=None)
@@ -107,16 +120,20 @@ def summary():
     return counts
 
 
-def work(client, settings, once=False):
+def work(client, settings, once=False, ready=None, should_stop=None):
     from .locking import worker_lock
     with worker_lock(ROOT / '.runtime' / 'worker.lock'):
         try:
             recover()
+            if ready:
+                ready()
             while True:
                 for path in sorted(QUEUE.glob('*.json')):
+                    if should_stop and should_stop():
+                        return
                     if read_json(path)['status'] == 'Queued':
                         process_job(path, client, settings)
-                if once:
+                if once or (should_stop and should_stop()):
                     return
                 time.sleep(.5)
         except KeyboardInterrupt:

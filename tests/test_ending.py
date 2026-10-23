@@ -8,7 +8,8 @@ import unittest
 from chatwell import prompts
 from chatwell.client import MockClient
 from chatwell.session import run
-from chatwell.storage import read_json, save
+from chatwell.storage import save
+from session_view import read_json
 
 ROOT = Path(__file__).resolve().parents[1]
 from chatwell import jobs
@@ -128,11 +129,12 @@ class EndingTests(unittest.TestCase):
             path = jobs.enqueue(input_path, 1)
             jobs.process_job(path, self.client(), {})
             job = read_json(path)
-            session = read_json(job['session_path'])
+            from chatwell.storage import read_json as read_record
+            session = read_record(job['session_path'])
             job.update(status='Running', ended=None)
             session['status'] = 'Running'
             session['timestamps']['ended'] = None
-            session['conversation']['ending_narration'] = ''
+            session['conversation']['ending']['output']['ending_narration'] = ''
             save(path, job)
             save(job['session_path'], session)
             jobs.recover()

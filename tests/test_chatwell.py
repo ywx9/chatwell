@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from chatwell.client import LocalClient, MockClient
 from chatwell.session import run
-from chatwell.storage import read_json
+from session_view import read_json
 from chatwell import validation
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,7 +40,7 @@ class SessionTests(unittest.TestCase):
         result = read_json(path)
         states = [s['status'] for s in snapshots]
         self.assertEqual(states[:3], ['Queued', 'Starting', 'Starting'])
-        self.assertTrue(all(state == 'Running' for state in states[3:-1]))
+        self.assertEqual(list(dict.fromkeys(states)), ['Queued', 'Starting', 'Running', 'Ended'])
         self.assertEqual(states[-1], 'Ended')
         self.assertEqual(set(result), set(read_json(ROOT / 'tests/fixtures/templates/chatwell.json')))
         self.assertEqual(set(result['config']), set(read_json(ROOT / 'tests/fixtures/templates/config.json')))

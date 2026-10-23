@@ -16,13 +16,14 @@ def parser():
     commands = root.add_subparsers(dest='command', required=True)
     for name in ('run', 'doctor', 'enqueue', 'worker', 'status'):
         p = commands.add_parser(name)
-        if name in ('run', 'doctor', 'worker'):
-            p.add_argument('--settings', help='Optional KEY=VALUE settings file; not shell code')
-            p.add_argument('--endpoint', help='llama.cpp HTTP(S) base URL, optionally ending in /v1')
-            p.add_argument('--timeout', type=float)
-            p.add_argument('--model', help='Server-side model ID/alias, not a GGUF file path')
-            p.add_argument('--max-tokens', type=int)
+        if name in ('run', 'doctor', 'worker', 'enqueue'):
+            p.add_argument('--settings', help='KEY=VALUE settings file')
             p.add_argument('--mock', action='store_true', help='Fixed fixtures; no model inference')
+            if name != 'enqueue':
+                p.add_argument('--endpoint', help='llama.cpp HTTP(S) base URL')
+                p.add_argument('--timeout', type=float)
+                p.add_argument('--model', help='Server-side model ID/alias, not a GGUF file path')
+                p.add_argument('--max-tokens', type=int)
         if name in ('run', 'enqueue'):
             p.add_argument('--input', required=True, help='Integrated config/characters JSON')
             p.add_argument('--max-turns', type=int)
@@ -31,6 +32,8 @@ def parser():
             p.add_argument('--debug-dir')
         if name in ('enqueue', 'worker', 'status'):
             p.add_argument('--data-dir', default='.', help='Shared queue, sessions and debug root')
+        if name == 'status':
+            p.add_argument('session', nargs='?', help='Session JSON; omit for queue counts')
         if name == 'worker':
             p.add_argument('--once', action='store_true', help='Process queued requests, then exit')
     return root
@@ -43,13 +46,24 @@ def main(argv=None):
         if args.command in ('enqueue', 'worker', 'status'):
             jobs.configure(args.data_dir)
         if args.command == 'enqueue':
-            print(jobs.enqueue(args.input, args.max_turns))
+            from pathlib import Path
+            from .tooling import enqueue
+            settings_path = Path(args.settings).resolve() if args.settings else Path(args.data_dir).resolve() / '.env'
+            enqueue(args.input, settings_path, Path(args.data_dir).resolve(), args.max_turns, args.mock)
             return 0
         if args.command == 'status':
-            print(json.dumps(jobs.summary(), ensure_ascii=False))
+            if args.session:
+                from .tooling import status
+                status(args.session)
+            else:
+                print(json.dumps(jobs.summary(), ensure_ascii=False))
             return 0
         settings = load(args)
         client = MockClient() if args.mock else LlamaClient(**settings, debug_dir=getattr(args, 'debug_dir', None))
+        if args.settings and not args.mock:
+            from .managed import ensure_server, attach_provenance
+            ensure_server(args.settings, settings)
+            attach_provenance(client, args.settings)
         if args.mock:
             logging.warning('MOCK: fixed fixtures, not model output')
         if args.command == 'doctor':
@@ -68,7 +82,7 @@ def main(argv=None):
             print(run(data['config'], data['characters'], client, args.output_dir, max_turns=args.max_turns))
         elif args.command == 'worker':
             # Authentication stays in memory; never persist API keys in queue metadata.
-            public_settings = {key: value for key, value in settings.items() if key != 'api_key'}
+            public_settings = {'mode': 'mock' if args.mock else 'model'}
             jobs.work(client, public_settings, args.once)
         return 0
     except urllib.error.HTTPError as error:

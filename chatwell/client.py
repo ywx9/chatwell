@@ -42,6 +42,26 @@ class LlamaClient:
         proxy = urllib.request.ProxyHandler({}) if loopback else urllib.request.ProxyHandler()
         self.opener = urllib.request.build_opener(proxy, NoRedirect())
 
+    def probe_metadata(self):
+        """Optional llama.cpp /props; absence must not block compatible servers."""
+        provenance = dict(getattr(self, 'provenance', {'management': 'external', 'llama_cpp_version': None,
+                          'model_file': None, 'model_sha256': None, 'source': 'unavailable'}))
+        if provenance.get('management') == 'self-managed':
+            return provenance
+        base = self.url[:-3] if self.url.endswith('/v1') else self.url
+        request = urllib.request.Request(base + '/props')
+        if self.api_key:
+            request.add_header('Authorization', 'Bearer ' + self.api_key)
+        try:
+            with self.opener.open(request, timeout=min(self.timeout, 5)) as response:
+                props = json.loads(response.read().decode('utf-8'), parse_constant=reject_constant)
+            version = props.get('build_info') if isinstance(props, dict) else None
+            if isinstance(version, str):
+                provenance.update(llama_cpp_version=version, source='server_props')
+        except (OSError, ValueError, TypeError):
+            pass
+        return provenance
+
     def complete(self, messages, options, schema=None):
         payload = dict(options, **self.inference_options)
         payload.setdefault('max_tokens', self.default_max_tokens)
@@ -67,6 +87,11 @@ class LlamaClient:
             finish_reason = choice.get('finish_reason')
         except (KeyError, IndexError, TypeError, AttributeError):
             raise ValueError('Invalid chat/completions response: missing choice/message/content') from None
+        usage = result.get('usage') or {}
+        self.last_metrics = {key: usage.get(key) if isinstance(usage, dict) else None
+                             for key in ('prompt_tokens', 'completion_tokens')}
+        self.last_metrics['finish_reason'] = finish_reason
+        self.response_model = result.get('model') if isinstance(result.get('model'), str) else None
         if finish_reason == 'length':
             raise ValueError('Model response exceeded max_tokens')
         if not isinstance(content, str) or not content.strip():

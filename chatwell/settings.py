@@ -2,10 +2,11 @@
 import math
 import os
 from pathlib import Path
+from .local_config import LOCAL_DEFAULTS, read_values
 
 DEFAULTS = {
     'CHATWELL_ENDPOINT': 'http://127.0.0.1:8080',
-    'CHATWELL_REQUEST_TIMEOUT': '600',
+    'CHATWELL_REQUEST_TIMEOUT': '3600',
     'CHATWELL_MAX_TOKENS': '6144',
     'CHATWELL_ENABLE_THINKING': 'true',
     'CHATWELL_REASONING_FORMAT': 'auto',
@@ -16,17 +17,11 @@ DEFAULTS = {
 def load(args):
     values = dict(DEFAULTS)
     if args.settings:
-        for number, line in enumerate(Path(args.settings).read_text(encoding='utf-8').splitlines(), 1):
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            key, sep, value = line.partition('=')
-            key, value = key.strip(), value.strip()
-            if not sep or key not in {*DEFAULTS, 'CHATWELL_MODEL', 'CHATWELL_API_KEY'}:
-                raise ValueError(f'設定ファイルの{number}行目: 未対応の設定です。')
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-                value = value[1:-1]
-            values[key] = value
+        configured = read_values(args.settings)
+        unknown = configured.keys() - {*DEFAULTS, *LOCAL_DEFAULTS, 'CHATWELL_MODEL', 'CHATWELL_API_KEY'}
+        if unknown:
+            raise ValueError('未対応の設定: ' + ', '.join(sorted(unknown)))
+        values.update({key: value for key, value in configured.items() if key not in LOCAL_DEFAULTS})
     for key in {*DEFAULTS, 'CHATWELL_MODEL', 'CHATWELL_API_KEY'}:
         if key in os.environ:
             values[key] = os.environ[key]
