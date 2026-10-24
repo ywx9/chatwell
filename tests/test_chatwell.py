@@ -29,9 +29,11 @@ class SessionTests(unittest.TestCase):
         client = MockClient()
         original = client.complete
         inputs = []
+        systems = []
 
         def capture(messages, options, schema):
             inputs.append(json.loads(messages[-1]['content']))
+            systems.append(messages[0]['content'])
             return original(messages, options, schema)
 
         client.complete = capture
@@ -48,7 +50,8 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(result['conversation']['turns'][0]['character']['name'], 'Alice')
         self.assertIn('ですね', result['conversation']['turns'][0]['character']['speech'])
         self.assertEqual(inputs[1]['non_participants'], ['Charlie'])
-        self.assertEqual(inputs[1]['character']['persona'], self.characters[0]['persona'])
+        self.assertNotIn('character', inputs[1])
+        self.assertIn(json.dumps({k: v for k, v in self.characters[0].items() if k != 'profile'}, ensure_ascii=False), systems[1])
         self.assertEqual(inputs[1]['language'], 'Japanese')
         self.assertIsNone(snapshots[0]['timestamps']['started'])
         for snapshot in snapshots[1:-1]:

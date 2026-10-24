@@ -21,6 +21,8 @@ class RecordingClient(MockClient):
 
     def complete(self, messages, options, schema=None):
         data = json.loads(messages[-1]['content'])
+        if schema == prompts.TURN_SCHEMA:
+            data['character'] = json.loads(messages[0]['content'].split('\nCharacter definition (JSON data):\n', 1)[1])
         self.calls.append((copy.deepcopy(data), schema))
         result = super().complete(messages, options, schema)
         if schema == prompts.INITIAL_SCHEMA:
@@ -87,17 +89,55 @@ class MultiTurnTests(unittest.TestCase):
             self.assertNotEqual(turn['character']['narration'], turn['narration'])
             self.assertEqual(set(turn['character']), {'name', 'speech', 'thought', 'narration', 'expression'})
 
-    def test_speaker_threshold_least_count_tie_and_invalid(self):
+    def test_speaker_excludes_previous_and_uses_weighted_fallback(self):
         a, b = self.characters
         turns = [{'character': {'name': 'Alice'}}]
-        self.assertIs(select_speaker(self.characters, turns, {'name': 'Alice', 'confidence': 0.7}), a)
-        self.assertIs(select_speaker(self.characters, turns, {'name': 'Alice', 'confidence': 0.69}), b)
+        self.assertIs(select_speaker(self.characters, turns, {'name': 'Alice', 'confidence': 1}), b)
         for recommendation in ({'name': 'Charlie', 'confidence': 1}, {}, None,
-                               {'confidence': 0.99}, {'name': 'Alice'}, {'name': 'Alice', 'confidence': True}):
+                               {'confidence': 0.99}, {'name': 'Alice'}, {'name': 'Bob', 'confidence': True}):
             self.assertIs(select_speaker(self.characters, turns, recommendation), b)
-        turns.append({'character': {'name': 'Bob'}})
-        self.assertIs(select_speaker(self.characters, turns, {'name': 'Bob', 'confidence': 0.1}), a)
-        self.assertIs(select_speaker(list(reversed(self.characters)), turns, {}), b)
+        self.assertIs(select_speaker([a], turns, {}), a)
+        c = {**a, 'name': 'Charlie'}
+        turns = [{'character': {'name': name}} for name in ('Alice', 'Bob', 'Bob', 'Bob', 'Alice')]
+        with patch('chatwell.speakers.random.choices', return_value=[c]) as choose:
+            self.assertIs(select_speaker([a, b, c], turns, {'name': 'Bob', 'confidence': .74}), c)
+            choose.assert_called_once_with([b, c], weights=[.25, 1.0], k=1)
+        with patch('chatwell.speakers.random.choices') as choose:
+            self.assertIs(select_speaker([a, b, c], turns, {'name': 'Bob', 'confidence': .75}), b)
+            choose.assert_not_called()
+
+    def test_character_system_and_public_recommendation_context(self):
+        calls = []
+        client = MockClient()
+        original = client.complete
+        def capture(messages, options, schema):
+            calls.append((copy.deepcopy(messages), schema))
+            return original(messages, options, schema)
+        client.complete = capture
+        run(self.config, self.characters, client, self.temp.name, max_turns=2)
+        acting = [(m, schema) for m, schema in calls if schema == prompts.TURN_SCHEMA]
+        for index, (messages, _) in enumerate(acting):
+            data = json.loads(messages[-1]['content'])
+            self.assertNotIn('character', data)
+            self.assertIn(json.dumps({k: v for k, v in self.characters[index].items() if k != 'profile'}, ensure_ascii=False), messages[0]['content'])
+            self.assertEqual(len(data['history']), index)
+            self.assertNotIn('ORIGINAL_GOAL_SECRET', messages[0]['content'])
+            self.assertNotIn(self.characters[1-index]['persona'], messages[0]['content'])
+            self.assertNotIn(self.characters[index]['profile'], json.dumps(messages, ensure_ascii=False))
+            self.assertEqual(next(p for p in data['participants'] if p['name'] == self.characters[index]['name']),
+                             {'name': self.characters[index]['name']})
+            self.assertEqual(next(p for p in data['participants'] if p['name'] == self.characters[1-index]['name'])['profile'],
+                             self.characters[1-index]['profile'])
+        updates = [(json.loads(m[-1]['content']), schema) for m, schema in calls if 'progress' in schema['properties']]
+        for index, (data, schema) in enumerate(updates):
+            context = data['speaker_context']
+            previous = self.characters[index]['name']
+            self.assertNotIn(previous, context['candidates'])
+            self.assertEqual(schema['properties']['speaker_recommendation']['properties']['name']['enum'], context['candidates'])
+            self.assertEqual(context['completed_message']['name'], previous)
+            for message in context['preceding_messages'] + [context['completed_message']]:
+                self.assertNotIn('thought', message)
+                self.assertNotIn('persona', message)
 
     def test_achieved_does_not_select_or_generate_again(self):
         original = MockClient.complete

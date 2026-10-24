@@ -1,19 +1,14 @@
+# Python cache
 __pycache__/
-*.pyc
-sessions/
-debug/
-.runtime/
-.venv/
-.local-artifacts/
+*.py[cod]
 
+# Local settings
 .env
 .env.*
 !.env.example
-*.gguf
 
-build/
-dist/
-*.egg-info/
-
-llama/
-llm/
+# Default runtime data and the legacy repository-root data layout
+/data/
+/sessions/
+/debug/
+/.runtime/

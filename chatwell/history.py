@@ -14,14 +14,32 @@ def character_history(turns, name):
     return history
 
 
+def recent_turns(conversation):
+    return conversation['turns'][conversation.get('compression', {}).get('through_turn', -1) + 1:]
+
+
+def scene_context(conversation):
+    memory = conversation.get('compression')
+    if memory is None:
+        return {key: conversation[key] for key in ('situation', 'beginning_narration')}
+    return {'memory': {'through_turn': memory['through_turn'],
+                       'facts': copy.deepcopy(memory['public_facts'])}}
+
+
 def character_input(conversation, character, characters, language):
-    return {
-        'situation': conversation['situation'],
+    data = {
+        **scene_context(conversation),
         'current_situation': conversation['turns'][-1]['current_situation'] if conversation['turns'] else conversation['situation'],
-        'beginning_narration': conversation['beginning_narration'],
-        'character': copy.deepcopy(character),
-        'participants': [{key: c[key] for key in ('name', 'profile')} for c in characters],
+        'character': {key: copy.deepcopy(value) for key, value in character.items() if key != 'profile'},
+        'participants': [
+            {'name': c['name']} if c['name'] == character['name']
+            else {key: c[key] for key in ('name', 'profile')}
+            for c in characters
+        ],
         'non_participants': list(conversation['non_participants']),
         'language': language,
-        'history': character_history(conversation['turns'], character['name']),
+        'history': character_history(recent_turns(conversation), character['name']),
     }
+    if 'compression' in conversation:
+        data['private_memory'] = copy.deepcopy(conversation['compression']['private_thoughts'].get(character['name'], []))
+    return data

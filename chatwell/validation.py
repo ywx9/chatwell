@@ -31,14 +31,16 @@ def request(config, characters):
     if not isinstance(options, dict):
         raise ValueError('llm_config must be an object')
     # Transport, roles and output constraints belong to the application.
-    allowed = {'temperature', 'max_tokens', 'top_p', 'top_k', 'min_p', 'seed', 'repeat_penalty'}
+    allowed = {'temperature', 'max_tokens', 'top_p', 'top_k', 'min_p', 'seed', 'repeat_penalty', 'reasoning_budget_tokens'}
     if options.keys() - allowed:
         raise ValueError(f'Unsupported llm_config keys: {options.keys() - allowed}')
     for key, value in options.items():
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError(f'{key} must be a finite number')
-        if key in ('max_tokens', 'top_k', 'seed') and not isinstance(value, int):
+        if key in ('max_tokens', 'top_k', 'seed', 'reasoning_budget_tokens') and not isinstance(value, int):
             raise ValueError(f'{key} must be an integer')
+        if key == 'reasoning_budget_tokens' and value < -1:
+            raise ValueError('reasoning_budget_tokens must be -1 or a nonnegative integer')
         if key == 'max_tokens' and value <= 0:
             raise ValueError('max_tokens must be positive')
     if not isinstance(characters, list) or not characters:

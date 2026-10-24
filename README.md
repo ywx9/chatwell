@@ -1,159 +1,116 @@
-# CHATWELL
+# CHATWELL v0.4.0
 
-**v0.3.1** — 任意のllama.cppサーバーを使い、複数キャラクターの会話を生成・保存するPython CLIです。推奨モデルは **Gemma 4系の対応GGUF**。Python 3.10以上が必要で、実行時の追加Pythonパッケージはありません。
+複数キャラクターの会話を生成する、ローカル・信頼できるネットワーク内向けのHTTP APIです。Python 3.10以上の標準ライブラリだけで動きます。
 
-既に使えるllama.cppサーバーがある場合は接続先を設定するだけです。未導入の場合は、任意の **self-managed-llama** 起動補助を使えます。Chatwellの中核はOS・CPU・GPU・Dockerに依存しません。実際に推論できる性能やメモリは、モデルと環境に依存します。
+## 起動
 
-以下はリポジトリ直下で実行します。Windowsで `python3` が使えない場合は `python` に置き換えてください。
+別途LLMサーバーを起動して、次を実行します。
 
-## 既存のllama.cppサーバーを使う
+```bash
+python tools/run.py
+```
 
-`.env.example` を参考に `.env` を作成します。既存ファイルを上書きしないでください。
+`python` はPython 3.10以上のコマンドを想定しています。環境によっては `python3` に置き換えてください。
+
+既定ではLLMに `http://127.0.0.1:8080` で接続し、Chatwellは `http://127.0.0.1:8090` で待ち受けます。設定ファイル・認証トークン・パッケージのインストールは不要です。
+
+LLMの接続先を変える場合は `.env` に記載するか、環境変数を指定します。
 
 ```dotenv
-SELF_MANAGED_LLAMA=false
-CHATWELL_ENDPOINT=http://127.0.0.1:8080
+LLM_ENDPOINT=http://127.0.0.1:8080
 ```
 
-サーバーを起動済み、または自分で起動できる場合はこの方式を使ってください。別ホストのHTTP(S)サーバーにも接続できます。認証が必要なら `CHATWELL_API_KEY` を環境変数に設定します。リモート接続はHTTPSを推奨します。
+信頼できるネットワーク内の他の端末から使う場合：
 
 ```bash
-python3 -m chatwell doctor --settings .env
-python3 tools/enqueue.py samples/input.json
+python tools/run.py --host 0.0.0.0
 ```
 
-接続先はベースURLで、末尾の `/v1` は省略可能です。必要なAPIは `/v1/chat/completions` と `response_format.type=json_schema`。`doctor` は実際に短い生成を要求して構造化JSONを確認します。Gemma 4系でも、llama.cppのバージョンとモデルに応じた対応が必要です。
+起動後はQueueへの登録を受け付け、1件ずつ順次処理します。Queueが空なら待機し、会話が完了しても常駐します。
 
-## self-managed-llamaを用意する
+**Ctrl+Cで受付と生成を中断し、アプリ全体を終了します。** 未着手の依頼は次回起動後に処理し、中断した依頼はFailedとして保持します。締めだけの中断では、完了した会話本体をEndedのまま保持します。
 
-**self-managed-llama** は、`llama/` に置いたllama.cppをChatwellの補助スクリプトが起動・停止する方式です。
+## API
 
-1. [llama.cppの公式リリース](https://github.com/ggml-org/llama.cpp/releases)から、OS・アーキテクチャ・利用するバックエンドに合う配布物をダウンロードします。ZIPなどを展開し、必要なライブラリも含めて `llama/` に配置してください。適切な配布物がない場合は公式のビルド手順を使えます。
-2. `llama/llama-server`、Windowsでは `llama/llama-server.exe` が存在する状態にします。Linux/macOSでは実行権限も必要です。
-3. Gemma 4系など、使用するllama.cppが対応するGGUFを `llm/` に配置します。
-4. 次の確認コマンドを実行します。
+Chatwell側の認証はありません。
 
 ```bash
-python3 tools/check-self-managed-llama.py
+curl http://127.0.0.1:8090/v1/sessions \
+  -H 'Content-Type: application/json' \
+  --data-binary @samples/input.json
 ```
 
-`.env` がなければ生成し、`SELF_MANAGED_LLAMA=true` を設定します。既存の設定値は尊重します。未設定のモデルについて `llm/*.gguf` を探索し、1件なら `LOCAL_GGUF_PATH` に記録、0件・複数件なら空欄にして案内します。複数の場合は候補を表示します。
-
-```dotenv
-SELF_MANAGED_LLAMA=true
-LOCAL_GGUF_PATH=llm/gemma-4-e2b-it-q4_k_m.gguf
-CHATWELL_ENDPOINT=http://127.0.0.1:8080
-LOCAL_LLAMA_CONTEXT=16384
-LOCAL_LLAMA_GPU_LAYERS=auto
-LOCAL_LLAMA_START_TIMEOUT=3600
-```
-
-`LOCAL_GGUF_PATH` は `llm/` 以外のパスでも構いません。相対パスは `.env` のあるディレクトリ基準です。確認コマンドはモデルが設定されていれば、起動・ヘルスチェック・構造化JSON応答まで確認します。モデル未設定や確認失敗の場合は非0で終了します。
+起動中のAPIへJSONファイルを投入する補助コマンドも使えます。起動とは別の端末から実行してください。
 
 ```bash
-python3 tools/start-self-managed-llama.py
-python3 tools/stop-self-managed-llama.py
+python3 tools/enqueue.py --input samples/input.json
 ```
 
-開始時は指定GGUFを使います。管理プロセスが起動した子プロセスだけを停止し、他のサーバーやコンテナは停止しません。設定変更後はworkerと管理サーバーを停止してから再実行してください。既に応答している手動起動サーバーを利用した場合、そのサーバーを停止することはありません。
+接続先はリポジトリの `.env` の `CHATWELL_HOST`・`CHATWELL_PORT` から取得します。`0.0.0.0` は接続時に `127.0.0.1` として扱います。別の設定ファイルは `--settings PATH` で指定できます。入力パスはコマンド実行時のディレクトリ基準です。成功時はAPI応答JSONを表示し、失敗時は終了コード1を返します。APIの起動や自動再送は行いません。
 
-`llama/`・`llm/`・`.env` はGit管理しません。モデルのダウンロードや推論基盤の一括自動導入は行いません。
+202応答の `id` と `url` で進捗・結果を取得します。同じ入力でも、POSTするたびに別の依頼になります。
 
-## 会話を登録する
-
-```bash
-python3 tools/enqueue.py samples/input.json
-# 短く試す場合
-python3 tools/enqueue.py samples/input.json --max-turns 3
-```
-
-`.env` がない場合はエラーになります。環境変数で値を上書きできます。`SELF_MANAGED_LLAMA=true` でサーバー未起動なら起動を待ち、workerが動いていなければバックグラウンドで起動します。
-
-登録時点で `Queued` のセッションJSONを作成し、そのパスを表示します。同じパスで完了まで追跡できます。ファイル名は **`yyyymmdd-hhmmss-ミリ秒Z-ランダムID.json`**。日時はUTCです。同じ入力の再登録も別セッションになります。
-
-```bash
-python3 tools/status.py sessions/20261023-042030-864Z-012345abcdef.json
-```
-
-status、処理段階、完了ターン数、最終更新時刻、締めのエラーを表示します。`Running` や最終更新時刻だけで処理が停止したとは断定しません。依頼は順番に処理し、同じデータディレクトリのworkerはロックで二重起動を防ぎます。ローカルファイルシステムで使用してください。
-
-```bash
-python3 tools/stop-worker.py
-```
-
-現在の依頼が終わった後にworkerを停止する依頼を送ります。停止完了を即時に保証するコマンドではありません。サーバーを止める場合はworkerの処理完了を確認してから停止してください。設定変更後に古いworkerが残っている場合、新しい依頼の登録はエラーにし、意図しない設定で処理しないようにします。環境変数だけを変更した場合もworkerの再起動が必要です。
-
-保存先は既定で `.env` のあるディレクトリです。`--settings PATH` と `--data-dir DIR` で変更できます。すべての操作で同じdata-dirを使ってください。
-
-| 保存先 | 内容 |
+| API | 用途 |
 |---|---|
-| `sessions/*.json` | 登録時の入力、状態、実効設定、会話、処理時間等 |
-| `.runtime/queue/*.json` | 内部キュー。利用者の状態確認はセッションJSONを参照 |
-| `.runtime/worker.log` | workerログ |
-| `.runtime/server.log` | self-managed-llamaの起動・実行ログ |
-| `debug/<依頼ID>/response-*.json` | workerの生API応答 |
+| `POST /v1/sessions` | 会話をQueueに登録 |
+| `GET /v1/sessions/{id}` | 状態と進捗 |
+| `GET /v1/sessions/{id}/result` | 会話の結果 |
+| `GET /v1/sessions/{id}/turns/{index}` | 指定ターンだけを取得（0始まり） |
+| `GET /healthz` | アプリの稼働確認 |
 
-強制終了で残った処理は次のworker起動時に復旧します。未完了の会話を自動で重複生成せず、失敗として保持します。締めだけの失敗は会話本体を `Ended` のまま残して `ending_error` に記録します。
+ターン取得は確定済みなら200、生成中で未確定なら202、終了後に存在しなければ404です。取得後も生成は続きます。
 
-## 実モデルで動作確認する
+思考予算は入力JSONの `config.llm_config.reasoning_budget_tokens` で指定できます（例：`2048`）。各LLM呼び出しにそのまま送信します。
 
-```bash
-python3 tools/test.py
-# 待機上限を変える場合（秒）
-python3 tools/test.py --wait-timeout 7200
-```
+入力例は [samples/input.json](samples/input.json)、保存結果の実例は [samples/output.json](samples/output.json) です。入力例はそのまま登録でき、コピーして人物・状況・生成設定をカスタマイズできます。出力例は11ターンで目標を達成した実行記録です。保存時のバージョン表記は`0.3.1`で、履歴圧縮は発生していません。実行時の記録をそのまま保持しています。
 
-`samples/input.json --max-turns 3` 相当を登録し、10秒ごとにstatusと経過時間を表示します。目標達成で3ターン未満に終了しても正常です。正常終了・保存結果・終了理由・締めの成功を確認して「テスト成功」と表示します。
+詳細は [HTTP API仕様](docs/http-api.md)、[入出力仕様](docs/input-output.md) を参照してください。
 
-待機上限は既定 **1時間**。超過時は生成失敗と断定せず「完了を確認できなかった」として終了コード2を返します。生成処理は停止しません。Ctrl+Cも監視だけを終了します。APIリクエスト単位のタイムアウトは別設定で、既定3600秒です。
+## 任意の設定
 
-## 設定
-
-優先順位は **CLI引数 → 環境変数 → 設定ファイル → 既定値**。`tools/` は既定でリポジトリの `.env` を使います。`python -m chatwell` の直接実行では環境変数のみでも使え、ファイルは `--settings` で指定します。
+`.env` は `KEY=VALUE` 形式です。環境変数で上書きできます。シェル・変数展開は行いません。設定変更は再起動後に反映します。
 
 | 設定 | 既定値・用途 |
 |---|---|
-| `CHATWELL_ENDPOINT` | `http://127.0.0.1:8080` |
-| `CHATWELL_MODEL` | 未指定。サーバー側モデルID／alias。GGUFパスではない |
-| `CHATWELL_API_KEY` | 未指定。Bearer認証。環境変数での指定を推奨 |
-| `CHATWELL_REQUEST_TIMEOUT` | 3600秒。1回のAPI応答待機 |
-| `CHATWELL_MAX_TOKENS` | 6144。入力の `llm_config.max_tokens` があれば入力を優先 |
-| `CHATWELL_ENABLE_THINKING` | `true` |
-| `CHATWELL_REASONING_FORMAT` | `auto`。`none/deepseek/deepseek-legacy` も指定可能 |
-| `CHATWELL_REASONING_IN_CONTENT` | `false`。構造化JSONのためtrueは拒否 |
-| `SELF_MANAGED_LLAMA` | `false`。ローカル起動補助を使うか |
-| `LOCAL_GGUF_PATH` | 空。使用GGUFのパス |
-| `LOCAL_LLAMA_CONTEXT` | 16384 |
-| `LOCAL_LLAMA_GPU_LAYERS` | `auto`。CPU実行などでは0も指定可能 |
-| `LOCAL_LLAMA_START_TIMEOUT` | 3600秒。サーバー準備待ち。超過しても強制停止しない |
+| `LLM_ENDPOINT` | `http://127.0.0.1:8080`。末尾 `/v1` は任意 |
+| `LLM_MODEL` | 任意。LLMサーバー側のモデルID |
+| `LLM_API_KEY` | 任意。LLMサーバーが認証を要求する場合だけ指定 |
+| `LLM_CONTEXT_SIZE` | `16384`。圧縮判定用。LLMサーバーのコンテキストサイズと合わせる |
+| `LLM_REQUEST_TIMEOUT` | `3600`秒。1回のLLM応答待ち |
+| `LLM_MAX_TOKENS` | `6144`。入力の `llm_config.max_tokens` が優先 |
+| `LLM_ENABLE_THINKING` | `true` |
+| `LLM_REASONING_FORMAT` | `auto`。`none/deepseek/deepseek-legacy` も指定可能 |
+| `LLM_REASONING_IN_CONTENT` | `false`。構造化JSONのためtrueは拒否 |
+| `CHATWELL_HOST` | `127.0.0.1` |
+| `CHATWELL_PORT` | `8090` |
+| `CHATWELL_DATA_DIR` | `data`。相対パスは `.env` のあるディレクトリ基準 |
 
-設定ファイルは `KEY=VALUE` 形式。外側の引用符は使えますが、シェル・変数展開や行末コメントは扱いません。未知のキーはエラーです。認証情報・内部ホスト名・モデルの絶対パスは共有用セッションの実行メタデータに含めません。生応答やログには会話内容や実行環境の情報が含まれます。
+LLMには `/v1/chat/completions` と `response_format.type=json_schema` の対応が必要です。LLMの起動・停止はChatwellの外で行います。
 
-## 入出力
+```bash
+python tools/run.py --settings /path/to/settings.env --data-dir /path/to/data --port 8091
+python tools/run.py --help
+```
 
-入力例は [samples/input.json](samples/input.json)。詳細は [入出力仕様](docs/input-output.md) に記載しています。
+会話は `data/sessions/`、内部Queueは `data/.runtime/queue/`、生のLLM応答は `data/debug/` に保存します。同じ保存先の二重起動は拒否します。
 
-v0.3.1では `schema_version` とChatwellのバージョン、実効設定、取得可能なモデル識別情報、llama.cppのバージョンを保存します。各ターンは `index`（0始まり）、`character`、`coordinator` を持ち、それぞれに `output` と `metrics` を置きます。初期化・締めにも同じ形式を使います。
+旧設定の `CHATWELL_ENDPOINT` は `LLM_ENDPOINT` に、ほかのLLM関連の `CHATWELL_*` は `LLM_*` に変更してください。Chatwell側の認証設定、旧CLIと起動管理用tools、別プロセスworker、LLM起動補助は廃止しています。既存の保存先を使う場合は `--data-dir .` などで指定してください。
 
-外部サーバーのモデルIDは生成応答から、バージョンは任意の `/props` が `build_info` を返す場合に取得します。取得できない情報は推測せず `null` にします。self-managed-llamaはGGUF名・SHA-256・実行ファイルのバージョンを記録し、ハッシュはファイルサイズと更新時刻が変わらない限り再利用します。同じ条件での完全な生成再現を保証するものではありません。
+## 履歴圧縮
 
-既存のセッションは書き換えません。今回添付されたv0.3.0の実行結果も旧形式として扱い、v0.3.1の出力例を捏造・自動変換しません。新形式の `samples/output.json` は実モデルでの実行後に追加する想定です。
+確定ターンごとに、Character・Coordinatorの実測 `prompt_tokens` の大きい方が `LLM_CONTEXT_SIZE - max_tokens` を超えたら、未圧縮部分の古い半分を累積要約へ統合します。事前のトークン計数や直近ターン保持数の下限は設けません。実測値が返らない場合は圧縮しません。
+
+最初は開始状況と冒頭描写も統合し、以後は前の要約を引き継ぎます。公開された出来事と人物別の内心を別々に要約し、人物には本人の内心だけを渡します。元のセッションの全ターンは保持し、LLMへの入力だけを要約＋未圧縮履歴に切り替えます。
+
+`LLM_CONTEXT_SIZE` はChatwellの判定値で、LLMサーバーの容量を変更する設定ではありません。サーバーの実際のコンテキストサイズと合わせてください。要約処理には追加のLLM呼び出しが発生します。詳細は [入出力仕様](docs/input-output.md#履歴圧縮) を参照してください。
 
 ## 開発
 
-通常の利用者がモデルなしテストを実行する必要はありません。開発・CIでは入力検証、保存、復旧、認証、プロセス管理をモデルの応答に左右されず検証します。
-
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -m chatwell run --input samples/input.json --mock --max-turns 3
+python tools/run.py --mock
 ```
 
-ソースからそのまま実行できます。パッケージとして使う場合は仮想環境で `python -m pip install .`、開発時は `python -m pip install -e .` を使います。`chatwell run/doctor/enqueue/worker/status` も利用できます。`enqueue` は `.env` または `--settings` を必要とし、自動起動を行います。`worker` はフォアグラウンド実行、Ctrl+Cで停止します。
+`--mock` は実LLMを使わない固定応答です。テストではHTTP API、Queue・保存・復旧、常駐、中断と再起動を検証します。Ctrl+Cによる実プロセスの終了テストはLinux/macOSが対象です。Pythonによる起動入口とAPIのテストはCIでLinux・macOS・Windowsを対象にします。
 
-CIはLinux・macOS・WindowsのPython 3.10/3.13を対象にします。今回のクラウド環境ではLinux x86_64/Python 3.12で検証しています。実GGUFでの推論と配布された各OS用バイナリの動作は未検証です。起動補助のテストはHTTPサーバーの代用品を使用しています。
-
-- [v0.3.1の変更・移行手順](docs/releases/v0.3.1.md)
-- [開発・リリース手順](CONTRIBUTING.md)
-- [v0.3.0](docs/releases/v0.3.0.md)以前の記録は過去のバージョンの結果です。
-
-GUI、履歴要約・圧縮、途中再開、自動再試行、依頼キャンセルは未実装です。goal未指定時はターン上限まで生成します。長い会話ではコンテキスト不足が起こり得ます。
+変更点と旧版からの移行は [v0.4.0](docs/releases/v0.4.0.md) を参照してください。`docs/releases/` と `docs/validation/` の旧版資料は過去の実装・検証の記録です。

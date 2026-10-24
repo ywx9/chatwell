@@ -1,6 +1,6 @@
-"""Persistent FIFO queue shared by the CLI and worker."""
-import os
+"""Persistent FIFO queue for the API and sequential generation loop."""
 import time
+from contextlib import nullcontext
 import uuid
 from pathlib import Path
 from datetime import datetime, timezone
@@ -18,7 +18,12 @@ def timestamp():
 
 
 def enqueue(path, max_turns=None):
-    data = read_json(path)
+    return enqueue_data(read_json(path), max_turns, input_path=str(Path(path).resolve()))
+
+
+def enqueue_data(data, max_turns=None, *, directory=None, input_path=None):
+    root = Path(directory).resolve() if directory is not None else ROOT
+    queue = root / '.runtime' / 'queue' if directory is not None else QUEUE
     validation.keys(data, ('config', 'characters'))
     validation.request(data['config'], data['characters'])
     if max_turns is None:
@@ -27,11 +32,15 @@ def enqueue(path, max_turns=None):
         raise ValueError('max-turns は1以上の整数を指定してください。')
     job_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ-') + uuid.uuid4().hex
     job = {'id': job_id, 'status': 'Queued', 'queued': timestamp(), 'started': None,
-           'ended': None, 'input_path': str(Path(path).resolve()), 'input': data,
+           'ended': None, 'input_path': input_path, 'input': data,
            'max_turns': max_turns, 'session_path': None, 'error': None}
-    job['session_path'] = str(new_session(data['config'], data['characters'], ROOT / 'sessions', max_turns).resolve())
-    target = QUEUE / f'{job_id}.json'
-    save(target, job)
+    job['session_path'] = str(new_session(data['config'], data['characters'], root / 'sessions', max_turns).resolve())
+    target = queue / f'{job_id}.json'
+    try:
+        save(target, job)
+    except Exception:
+        Path(job['session_path']).unlink(missing_ok=True)
+        raise
     return target
 
 
@@ -120,9 +129,9 @@ def summary():
     return counts
 
 
-def work(client, settings, once=False, ready=None, should_stop=None):
+def work(client, settings, once=False, ready=None, should_stop=None, *, acquire_lock=True):
     from .locking import worker_lock
-    with worker_lock(ROOT / '.runtime' / 'worker.lock'):
+    with worker_lock(ROOT / '.runtime' / 'worker.lock') if acquire_lock else nullcontext():
         try:
             recover()
             if ready:

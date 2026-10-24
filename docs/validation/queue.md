@@ -1,5 +1,7 @@
 # JSON入力・会話キューの検証
 
+この文書は旧版の検証記録です。現行版の操作・検証結果は [README](../../README.md) と [v0.4.0](../releases/v0.4.0.md) を参照してください。
+
 実施日: 2026-10-23（日本時間）。本機のLinux ARM64 / NVIDIA GB10、Python 3.12.3、既存Melody GGUFと固定llama.cppイメージを使用。
 
 ## 実装内容

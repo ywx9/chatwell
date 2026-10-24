@@ -1,6 +1,3 @@
-import argparse
-from contextlib import redirect_stdout, redirect_stderr
-import io
 import json
 import os
 from pathlib import Path
@@ -12,61 +9,34 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
-from chatwell.__main__ import main, parser
 from chatwell.client import LlamaClient
 from chatwell.locking import worker_lock
-from chatwell.settings import load
+from chatwell.settings import inference_settings, read_settings
 from chatwell.storage import read_json
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class CliTests(unittest.TestCase):
-    def test_direct_and_queue_share_input_and_settings(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
-            output = io.StringIO()
-            with redirect_stdout(output):
-                self.assertEqual(main(['run', '--input', str(ROOT / 'samples/input.json'), '--mock',
-                                       '--max-turns', '2', '--output-dir', directory]), 0)
-            result = read_json(output.getvalue().strip())
-            self.assertEqual(len(result['conversation']['turns']), 2)
-            self.assertEqual(result['status'], 'Ended')
-            settings_path = Path(directory) / '.env'
-            settings_path.write_text('SELF_MANAGED_LLAMA=false\n')
-            with redirect_stdout(io.StringIO()), patch('chatwell.tooling.ensure_worker'):
-                self.assertEqual(main(['enqueue', '--input', str(ROOT / 'samples/input.json'),
-                                       '--max-turns', '2', '--data-dir', directory, '--mock', '--settings', str(settings_path)]), 0)
-                self.assertEqual(main(['worker', '--mock', '--once', '--data-dir', directory]), 0)
-            job = read_json(next((Path(directory) / '.runtime/queue').glob('*.json')))
-            self.assertEqual(job['status'], 'Ended')
-            self.assertEqual(read_json(job['session_path'])['config'], result['config'])
-            self.assertNotIn('api_key', job['runtime'])
-
+class ClientSettingsTests(unittest.TestCase):
     def test_settings_precedence_and_no_shell_expansion(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
             path = Path(directory) / 'settings.env'
-            path.write_text('CHATWELL_ENDPOINT=https://file.test\nCHATWELL_MODEL=$(not-a-command)\n'
-                            'CHATWELL_MAX_TOKENS=2048\n', encoding='utf-8')
-            args = parser().parse_args(['run', '--input', 'unused', '--settings', str(path)])
-            self.assertEqual(load(args)['endpoint'], 'https://file.test')
-            self.assertEqual(load(args)['model'], '$(not-a-command)')
-            with patch.dict(os.environ, {'CHATWELL_ENDPOINT': 'https://environment.test'}):
-                self.assertEqual(load(args)['endpoint'], 'https://environment.test')
-                args.endpoint = 'https://cli.test'
-                self.assertEqual(load(args)['endpoint'], 'https://cli.test')
-            self.assertEqual(load(args)['default_max_tokens'], 2048)
+            path.write_text('LLM_ENDPOINT=https://file.test\nLLM_MODEL=$(not-a-command)\n'
+                            'LLM_MAX_TOKENS=2048\n', encoding='utf-8')
+            self.assertEqual(inference_settings(read_settings(path))['endpoint'], 'https://file.test')
+            self.assertEqual(inference_settings(read_settings(path))['model'], '$(not-a-command)')
+            with patch.dict(os.environ, {'LLM_ENDPOINT': 'https://environment.test'}):
+                self.assertEqual(inference_settings(read_settings(path))['endpoint'], 'https://environment.test')
+            self.assertEqual(inference_settings(read_settings(path))['default_max_tokens'], 2048)
 
     def test_invalid_settings_and_inputs_fail(self):
         with patch.dict(os.environ, {}, clear=True):
             for value in ('nan', '0', '-1'):
-                args = parser().parse_args(['doctor', '--timeout', value])
                 with self.assertRaises(ValueError):
-                    load(args)
-            with patch.dict(os.environ, {'CHATWELL_ENABLE_THINKING': 'maybe'}):
+                    inference_settings({**read_settings(None), 'LLM_REQUEST_TIMEOUT': value})
+            with patch.dict(os.environ, {'LLM_ENABLE_THINKING': 'maybe'}):
                 with self.assertRaises(ValueError):
-                    load(parser().parse_args(['doctor']))
-        with redirect_stderr(io.StringIO()):
-            self.assertEqual(main(['run', '--input', 'does-not-exist.json', '--mock']), 1)
+                    inference_settings(read_settings(None))
 
     def test_worker_lock_excludes_another_process_and_releases(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -80,7 +50,7 @@ class CliTests(unittest.TestCase):
             attempt = subprocess.run([sys.executable, '-c', code, str(path)], cwd=ROOT, capture_output=True)
             self.assertEqual(attempt.returncode, 0, attempt.stderr)
 
-    def test_doctor_and_auth_against_http_server(self):
+    def test_auth_against_http_server(self):
         received = []
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
@@ -101,16 +71,17 @@ class CliTests(unittest.TestCase):
         thread.start()
         try:
             url = f'http://127.0.0.1:{server.server_port}/v1'
-            with patch.dict(os.environ, {'CHATWELL_API_KEY': 'test-only-key'}), redirect_stdout(io.StringIO()) as out:
-                self.assertEqual(main(['doctor', '--endpoint', url, '--model', 'gemma']), 0)
-            self.assertIn('OK', out.getvalue())
+            from urllib.error import HTTPError
+            client = LlamaClient(url, api_key='test-only-key', model='gemma',
+                                 inference_options={'reasoning_in_content': False})
+            self.assertEqual(client.complete([{'role': 'user', 'content': 'Return JSON'}], {},
+                                             {'type': 'object'}), {'ok': True})
             self.assertEqual(received[0][0], '/v1/chat/completions')
             self.assertEqual(received[0][2]['model'], 'gemma')
             self.assertFalse(received[0][2]['reasoning_in_content'])
-            with patch.dict(os.environ, {'CHATWELL_API_KEY': ''}), self.assertLogs(level='ERROR') as logs:
-                self.assertEqual(main(['doctor', '--endpoint', url]), 1)
-            self.assertIn('401', str(logs.output))
-            self.assertNotIn('test-only-key', str(logs.output))
+            with self.assertRaises(HTTPError) as error:
+                LlamaClient(url).complete([], {})
+            self.assertEqual(error.exception.code, 401)
         finally:
             server.shutdown()
             server.server_close()

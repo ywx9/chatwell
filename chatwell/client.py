@@ -11,7 +11,7 @@ def reject_constant(value):
 
 
 class LlamaClient:
-    def __init__(self, endpoint='http://127.0.0.1:8080', timeout=180, debug_dir=None, *, inference_options=None, default_max_tokens=6144, api_key=None, model=None):
+    def __init__(self, endpoint='http://127.0.0.1:8080', timeout=180, debug_dir=None, *, inference_options=None, default_max_tokens=6144, api_key=None, model=None, context_size=16384):
         parsed = urlsplit(endpoint)
         if (parsed.scheme not in ('http', 'https') or not parsed.hostname
                 or parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment):
@@ -30,6 +30,9 @@ class LlamaClient:
         self.timeout = timeout
         self.debug_dir = Path(debug_dir) if debug_dir else None
         self.inference_options = dict(inference_options or {})
+        if isinstance(context_size, bool) or not isinstance(context_size, int) or context_size < 1:
+            raise ValueError('context_size must be a positive integer')
+        self.context_size = context_size
         self.default_max_tokens = default_max_tokens
         self.api_key = api_key
         self.model = model
@@ -46,8 +49,6 @@ class LlamaClient:
         """Optional llama.cpp /props; absence must not block compatible servers."""
         provenance = dict(getattr(self, 'provenance', {'management': 'external', 'llama_cpp_version': None,
                           'model_file': None, 'model_sha256': None, 'source': 'unavailable'}))
-        if provenance.get('management') == 'self-managed':
-            return provenance
         base = self.url[:-3] if self.url.endswith('/v1') else self.url
         request = urllib.request.Request(base + '/props')
         if self.api_key:
@@ -106,10 +107,21 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 class MockClient:
     """Explicit fixture responses; never presented as model inference."""
+    context_size = 16384
+
     def complete(self, messages, options, schema=None):
         if schema is None:
             return 'Hello from the mock fixture.'
         data = json.loads(messages[-1]['content'])
+        if set(schema['properties']) == {'facts'}:
+            facts = list(data['previous_facts'])
+            if 'initial_scene' in data:
+                facts.append(data['initial_scene']['situation'])
+            for turn in data.get('turns', []):
+                facts.append(f"Turn {turn['index']}: {turn['name']} said {turn['speech']}")
+            for thought in data.get('thoughts', []):
+                facts.append(f"Turn {thought['index']}: {thought['thought']}")
+            return {'facts': facts}
         if 'ending_narration' in schema['properties']:
             return {'ending_narration': '窓辺の柔らかな光の中、二人を包む穏やかな時間が流れていた。'}
         if 'non_participants' in schema['properties']:
@@ -118,14 +130,14 @@ class MockClient:
             return {'situation': data['situation'], 'goal': data.get('goal') or '', 'non_participants': absent,
                     'beginning_narration': '放課後の静かなカフェで、二人は向かい合って座っていた。'}
         if 'progress' in schema['properties']:
-            number = len(data['history']) + 1
+            number = data.get('completed_turns', len(data['history'])) + 1
             names = [c['name'] for c in data['characters']]
             return {
                 'narration': '静かな店内で、会話が続いた。',
                 'current_situation': 'The participants are talking in the cafe.',
                 'progress': 'Achieved' if data['goal'] and number >= 3 else ('Approaching' if data['goal'] else 'Unchanged'),
                 'progress_reason': 'Mock fixture reaches its goal at turn three.' if data['goal'] else 'No goal supplied.',
-                'speaker_recommendation': {'name': names[number % len(names)], 'confidence': 0.9 if number % 2 else 0.2},
+                'speaker_recommendation': {'name': data.get('speaker_context', {}).get('candidates', names)[0], 'confidence': 0.9 if number % 2 else 0.2},
             }
         if schema:
             return {'speech': '今日は静かですね。', 'thought': '少し緊張するな。', 'narration': '窓の外に目を向けた。', 'expression': '控えめな笑顔'}

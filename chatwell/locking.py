@@ -1,8 +1,6 @@
 """OS-backed locks are released automatically when a worker exits."""
 from contextlib import contextmanager
 import os
-import time
-from contextlib import ExitStack
 
 
 @contextmanager
@@ -31,19 +29,3 @@ def worker_lock(path):
                 msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
             else:
                 fcntl.flock(stream, fcntl.LOCK_UN)
-
-
-@contextmanager
-def wait_lock(path, timeout=30):
-    """Serialize launches/submissions without mistaking them for duplicate workers."""
-    deadline = time.monotonic() + timeout
-    with ExitStack() as stack:
-        while True:
-            try:
-                stack.enter_context(worker_lock(path))
-                break
-            except RuntimeError:
-                if time.monotonic() >= deadline:
-                    raise RuntimeError('別の起動・登録操作の完了を確認できませんでした。再実行してください。') from None
-                time.sleep(.1)
-        yield

@@ -1,5 +1,7 @@
 # 本機のサーバー管理スクリプト検証
 
+この文書は旧版の検証記録です。現行版の操作・検証結果は [README](../../README.md) と [v0.4.0](../releases/v0.4.0.md) を参照してください。
+
 実施日: 2026-10-23（日本時間）。Linux ARM64、NVIDIA GB10、Python 3.12.3、既存 Docker Engine / NVIDIA CDI 環境で確認。
 
 ## 実装

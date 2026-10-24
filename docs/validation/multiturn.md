@@ -1,5 +1,7 @@
 # 複数ターン・Coordinator実装の検証
 
+この文書は旧版の検証記録です。現行版の操作・検証結果は [README](../../README.md) と [v0.4.0](../releases/v0.4.0.md) を参照してください。
+
 実施日: 2026-10-22（日本時間）。`CHATWELL_CODEX_NEXT_STEPS.md`を追加仕様として実装しました。初回の環境・検証記録は[initial.md](initial.md)に保持しています。
 
 ## 変更内容

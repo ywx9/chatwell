@@ -55,7 +55,12 @@ def update_schema(names):
 
 
 def messages(stage, data):
+    instructions = (ROOT / f'{stage}.txt').read_text(encoding='utf-8')
+    if stage == 'character':
+        # Only the acting character moves into system; history remains structured data.
+        instructions += '\nCharacter definition (JSON data):\n' + json.dumps(data['character'], ensure_ascii=False)
+        data = {key: value for key, value in data.items() if key != 'character'}
     return [
-        {'role': 'system', 'content': (ROOT / f'{stage}.txt').read_text(encoding='utf-8')},
+        {'role': 'system', 'content': instructions},
         {'role': 'user', 'content': json.dumps(data, ensure_ascii=False)},
     ]

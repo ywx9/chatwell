@@ -1,18 +1,14 @@
-import copy
-import io
 import json
-from contextlib import redirect_stdout
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from chatwell import jobs
+from chatwell import jobs, __version__
 from chatwell.client import MockClient
 from chatwell.records import SCHEMA_VERSION
 from chatwell.session import run
 from chatwell.storage import read_json, save
-from chatwell.tooling import monitor, status
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,6 +24,8 @@ class RecordTests(unittest.TestCase):
         return run(self.data['config'], self.data['characters'], client or MockClient(), self.directory, max_turns=turns)
 
     def test_schema_effective_settings_metrics_and_filename(self):
+        # Exercise the client default independently of the editable sample input.
+        self.data['config'].setdefault('llm_config', {}).pop('max_tokens', None)
         class Timed(MockClient):
             default_max_tokens = 2048
             model = 'requested-alias'
@@ -40,8 +38,7 @@ class RecordTests(unittest.TestCase):
         self.assertRegex(path.name, r'^\d{8}-\d{6}-\d{3}Z-[0-9a-f]{12}\.json$')
         data = read_json(path)
         self.assertEqual(data['schema_version'], SCHEMA_VERSION)
-        self.assertEqual(data['chatwell_version'], '0.3.1')
-        self.assertEqual(data['config']['max_turns'], 20)
+        self.assertEqual(data['chatwell_version'], __version__)
         self.assertEqual(data['runtime']['max_turns'], 2)
         self.assertEqual(data['runtime']['llm_config']['max_tokens'], 2048)
         self.assertEqual(data['runtime']['response_model'], 'reported-model')
@@ -93,30 +90,6 @@ class RecordTests(unittest.TestCase):
         self.assertEqual(record['error'], 'TimeoutError')
         self.assertGreaterEqual(record['metrics']['duration_ms'], 0)
 
-    def test_monitor_success_failure_timeout_and_ending_error(self):
-        path = self.generate()
-        data = read_json(path)
-        with redirect_stdout(io.StringIO()) as output:
-            self.assertEqual(monitor(path), 0)
-        self.assertIn('テスト成功', output.getvalue())
-        for mutation in ('failed', 'ending_error', 'empty_turns'):
-            record = copy.deepcopy(data)
-            if mutation == 'failed':
-                record['status'] = 'Failed'
-            elif mutation == 'ending_error':
-                record['conversation']['ending_error'] = 'bad closing'
-            else:
-                record['conversation']['turns'] = []
-            save(path, record)
-            with redirect_stdout(io.StringIO()):
-                self.assertEqual(monitor(path), 1)
-        data['status'] = 'Running'
-        save(path, data)
-        with patch('chatwell.tooling.time.monotonic', side_effect=[0, 3601]), redirect_stdout(io.StringIO()) as output:
-            self.assertEqual(monitor(path), 2)
-        self.assertIn('停止していません', output.getvalue())
-        self.assertEqual(read_json(path)['status'], 'Running')
-
     def test_worker_stop_preserves_remaining_queued_requests(self):
         jobs.configure(self.directory)
         first = jobs.enqueue(ROOT / 'samples/input.json', 1)
@@ -125,9 +98,3 @@ class RecordTests(unittest.TestCase):
         self.assertEqual(read_json(first)['status'], 'Ended')
         self.assertEqual(read_json(second)['status'], 'Queued')
         self.assertEqual(read_json(read_json(second)['session_path'])['status'], 'Queued')
-
-    def test_status_rejects_non_sessions(self):
-        path = self.directory / 'invalid.json'
-        save(path, {'status': 'Ended'})
-        with self.assertRaises(ValueError):
-            status(path)

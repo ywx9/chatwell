@@ -54,6 +54,11 @@ def encode(session, calls):
     for key in ('pending_turn', 'pending_initialization', 'pending_ending', 'ending_error'):
         if key in source:
             target[key] = copy.deepcopy(source[key])
+    if 'compression' in source:
+        target['compression'] = copy.deepcopy(source['compression'])
+    compressions = [copy.deepcopy(call) for kind, call in calls.items() if kind.startswith('compressing_history:')]
+    if compressions:
+        target['compressions'] = compressions
     index = len(source['turns'])
     if f'character:{index}' in calls:
         target['pending_turn'] = {'index': index, 'character': copy.deepcopy(calls[f'character:{index}'])}
