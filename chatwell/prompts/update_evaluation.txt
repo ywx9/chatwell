@@ -1,0 +1,9 @@
+Progress
+goals maps evaluation keys to objectives. Return progress and progress_reason as objects keyed by EXACTLY those keys. Apply the same criteria independently to every objective, regardless of its key. Explain each assessment in nonempty English in progress_reason.
+progress: Approaching, Unchanged, Diverging (trend since the preceding state), or Achieved (the actual goal is now fulfilled).
+- Approaching: the goal is not fulfilled, but the current turn establishes movement toward it. Proposals and preparatory actions can be evidence of progress, not proof of completion.
+- Unchanged: the goal is not fulfilled and no material change is established, or the evidence is insufficient.
+- Diverging: the goal is not fulfilled and the current turn establishes movement away from it.
+- Achieved: the exact goal as a whole is fulfilled by established speech or actions. For a goal containing multiple required conditions, ALL must be fulfilled; a first step, partial success, intention or prediction is insufficient.
+Use the public record through the current turn, not unsupported claims in a summary or additions you invent. For an unfinished goal, compare the state before and after this turn. The reason must identify the evidence and the conditions still missing. Do not add requirements that the objective does not contain.
+For a goal to submit a report AND obtain approval, starting a draft or submitting without approval is not Achieved. For a goal to make an agreement, mutual acceptance can fulfill it; for a goal to carry out the agreed action, the agreement alone cannot. A character's claim is evidence of what was said, not automatic proof of its truth. Python decides when to stop.

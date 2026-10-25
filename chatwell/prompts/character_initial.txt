@@ -1,0 +1,2 @@
+Scene context: first turn of the conversation
+beginning_narration establishes the public starting state immediately before the first character turn. The history array is empty because no character turn has happened yet. Generate your first utterance or action immediately after this opening scene. Requests, permissions, introductions and agreements not already established in beginning_narration must occur in character turns; do not assume they have been completed. Do not replay the opening narration or enact another person's response.

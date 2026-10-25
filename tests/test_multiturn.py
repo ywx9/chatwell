@@ -26,13 +26,13 @@ class RecordingClient(MockClient):
         self.calls.append((copy.deepcopy(data), schema))
         result = super().complete(messages, options, schema)
         if schema == prompts.INITIAL_SCHEMA:
-            result['goal'] = 'REFINED_GOAL_SECRET' if data.get('goal') else ''
+            result['goal'] = 'REFINED_GOAL_SECRET'
             result['situation'] = 'REFINED_SCENE'
         elif schema == prompts.TURN_SCHEMA:
             result['thought'] = f"PRIVATE_{data['character']['name']}"
             result['narration'] = 'ORIGINAL_NARRATION'
         elif 'progress' in schema['properties']:
-            result['progress_reason'] = 'PRIVATE_ASSESSMENT'
+            result['progress_reason'] = {key: 'PRIVATE_ASSESSMENT' for key in data['goals']}
         return result
 
 
@@ -54,7 +54,7 @@ class MultiTurnTests(unittest.TestCase):
         self.assertEqual(result['config'], self.config)
         self.assertEqual(result['characters'], self.characters)
         self.assertEqual(conversation['situation'], 'REFINED_SCENE')
-        self.assertEqual(conversation['goal'], 'REFINED_GOAL_SECRET')
+        self.assertEqual(conversation['goal'], 'ORIGINAL_GOAL_SECRET')
         self.assertEqual(conversation['non_participants'], ['Charlie'])
         self.assertEqual(conversation['stop_reason'], 'goal_achieved')
         self.assertEqual([t['character']['name'] for t in conversation['turns']], ['Alice', 'Bob', 'Alice'])
@@ -80,7 +80,7 @@ class MultiTurnTests(unittest.TestCase):
                 self.assertEqual(historic['narration'], '静かな店内で、会話が続いた。')
         self.assertNotIn('current_situation', character_calls[1])
         updates = [d for d, s in client.calls if 'progress' in s['properties']]
-        self.assertTrue(all(d['goal'] == 'REFINED_GOAL_SECRET' for d in updates))
+        self.assertTrue(all(d['goals'] == {'common': 'ORIGINAL_GOAL_SECRET'} for d in updates))
         self.assertNotIn('PRIVATE_Alice', json.dumps(updates))
         self.assertTrue(all('thought' not in d['character'] and 'private_memory' not in d for d in updates))
         self.assertTrue(any('pending_turn' in s['conversation'] for s in snapshots))
@@ -147,7 +147,7 @@ class MultiTurnTests(unittest.TestCase):
         def achieved(client, messages, options, schema):
             result = original(client, messages, options, schema)
             if 'progress' in schema['properties']:
-                result['progress'] = 'Achieved'
+                result['progress'] = {key: 'Achieved' for key in result['progress']}
             return result
 
         with patch.object(MockClient, 'complete', achieved), patch('chatwell.session.select_speaker') as select:
@@ -176,7 +176,7 @@ class MultiTurnTests(unittest.TestCase):
         def achieved(client, messages, options, schema):
             result = original(client, messages, options, schema)
             if 'progress' in schema['properties']:
-                result['progress'] = 'Achieved'
+                result['progress'] = {key: 'Achieved' for key in result['progress']}
             return result
 
         with patch.object(MockClient, 'complete', achieved):
@@ -244,11 +244,11 @@ class MultiTurnTests(unittest.TestCase):
                 validation.turn(bad)
         for confidence in (-0.01, 1.01, True, float('nan'), '0.8'):
             with self.assertRaises(ValueError):
-                validation.update({'narration': '', 'current_situation': 'Scene', 'progress': 'Unchanged',
-                                   'progress_reason': 'Reason', 'speaker_recommendation': {'name': 'Alice', 'confidence': confidence}})
-        schema = prompts.update_schema(['Alice', 'Bob'])
+                validation.update({'narration': '', 'current_situation': 'Scene', 'progress': {},
+                                   'progress_reason': {}, 'speaker_recommendation': {'name': 'Alice', 'confidence': confidence}})
+        schema = prompts.update_schema(['Alice', 'Bob'], ['common'])
         self.assertEqual(schema['properties']['speaker_recommendation']['properties']['name']['enum'], ['Alice', 'Bob'])
-        self.assertEqual(schema['properties']['progress']['enum'], list(prompts.PROGRESS))
+        self.assertEqual(schema['properties']['progress']['properties']['common']['enum'], list(prompts.PROGRESS))
 
     def test_invalid_runtime_limits(self):
         for options in ({'max_turns': 0}, {'max_turns': True}, {'recommendation_threshold': 1.1},

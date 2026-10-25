@@ -28,7 +28,7 @@ def scene_context(conversation):
 
 def character_input(conversation, character, characters, language):
     data = {
-        **scene_context(conversation),
+        **character_context(conversation, character['name']),
         'character': {key: copy.deepcopy(value) for key, value in character.items() if key != 'profile'},
         'participants': [
             {'name': c['name']} if c['name'] == character['name']
@@ -37,8 +37,21 @@ def character_input(conversation, character, characters, language):
         ],
         'non_participants': list(conversation['non_participants']),
         'language': language,
-        'history': character_history(recent_turns(conversation), character['name']),
     }
-    if 'compression' in conversation:
-        data['private_memory'] = copy.deepcopy(conversation['compression']['private_thoughts'].get(character['name'], []))
     return data
+
+
+def character_context(conversation, name):
+    # Compression takes precedence: an empty remaining history is still a continuation.
+    if conversation.get('compression') is not None:
+        return {
+            **scene_context(conversation),
+            'private_memory': copy.deepcopy(conversation['compression']['private_thoughts'].get(name, [])),
+            'history': character_history(recent_turns(conversation), name),
+        }
+    if not conversation['turns']:
+        return {'beginning_narration': conversation['beginning_narration'], 'history': []}
+    return {
+        'beginning_narration': conversation['beginning_narration'],
+        'history': character_history(conversation['turns'], name),
+    }

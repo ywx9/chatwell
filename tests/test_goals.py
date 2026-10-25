@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from chatwell import prompts, validation
+from chatwell import goals, prompts, validation
 from chatwell.client import MockClient
 from chatwell.session import run
 from chatwell.storage import read_json
@@ -39,7 +39,8 @@ class GoalTests(unittest.TestCase):
         self.assertEqual(result['status'], 'Ended')
         self.assertEqual(result['conversation']['initialization']['output']['goal'], goals)
         initial = json.loads(client.calls[0][0][-1]['content'])
-        self.assertIsNone(initial['goal'])
+        self.assertNotIn('goal', initial)
+        self.assertNotIn('goals', initial)
         self.assertEqual(set(initial['characters'][0]), {'name', 'profile'})
         self.assertIn('mentioned_non_participants', initial)
         for messages, schema in client.calls:
@@ -53,7 +54,7 @@ class GoalTests(unittest.TestCase):
                     if name != actor['name']:
                         self.assertNotIn(goal, json.dumps(messages))
             elif 'progress' in schema['properties']:
-                self.assertEqual(data['goal'], goals)
+                self.assertEqual(data['goals'], goals)
                 self.assertEqual(set(schema['properties']['progress']['properties']), set(goals))
                 self.assertNotIn('private_memory', data)
                 self.assertNotIn('thought', data['character'])
@@ -99,7 +100,7 @@ class GoalTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validation.update(base, {'Alice': 'A'})
         with self.assertRaises(ValueError):
-            validation.update(base, 'common goal')
+            validation.update(base, {'common': 'common goal'})
         with self.assertRaises(ValueError):
             validation.update({**base, 'progress': 'Achieved', 'progress_reason': 'Completed'}, {'Bob': 'B'})
 
@@ -111,3 +112,60 @@ class GoalTests(unittest.TestCase):
         for messages, schema in client.calls:
             if schema == prompts.TURN_SCHEMA:
                 self.assertNotIn('PRIVATE_COMMON_GOAL', json.dumps(messages))
+
+    def test_initialization_is_scene_only_and_preserves_requested_goals(self):
+        class InventedGoal(CapturedClient):
+            def complete(self, messages, options, schema=None):
+                result = super().complete(messages, options, schema)
+                if schema == prompts.INITIAL_SCHEMA:
+                    # Replay a legacy server returning a goal despite the scene-only schema.
+                    result['goal'] = 'MODEL_INVENTED_OBJECTIVE'
+                return result
+        for goal in ('Submit the report and obtain approval.', {'Alice': 'Submit the report.'}, {}):
+            with self.subTest(goal=goal):
+                client = InventedGoal()
+                result = self.generate(goal, client, turns=1)
+                self.assertEqual(result['status'], 'Ended')
+                self.assertEqual(result['conversation']['initialization']['output']['goal'], goal)
+                messages, schema = client.calls[0]
+                self.assertNotIn('goal', json.loads(messages[1]['content']))
+                self.assertNotIn('goal', schema['properties'])
+                self.assertNotIn('goal', schema['required'])
+                update = next(json.loads(m[1]['content']) for m, s in client.calls if 'progress' in s['properties'])
+                self.assertEqual(update['goals'], goals.normalize(goal))
+                self.assertNotIn('MODEL_INVENTED_OBJECTIVE', json.dumps(update))
+
+    def test_recorded_initialization_error_no_longer_blocks_personal_goals(self):
+        # Same failure shape as the reported session; no dependency on private data files.
+        legacy = {
+            'situation': 'Alice and Bob meet at a cafe.',
+            'goal': 'An inferred shared objective that was not requested.',
+            'non_participants': [], 'beginning_narration': 'Alice is sitting at a cafe table.',
+        }
+        class Replay(CapturedClient):
+            def complete(self, messages, options, schema=None):
+                if schema == prompts.INITIAL_SCHEMA:
+                    self.calls.append((copy.deepcopy(messages), schema))
+                    return copy.deepcopy(legacy)
+                return super().complete(messages, options, schema)
+        goal = {'Bob': 'Agree to go out together this weekend.'}
+        result = self.generate(goal, Replay(), turns=1)
+        self.assertEqual(result['status'], 'Ended')
+        self.assertEqual(result['conversation']['initialization']['output']['goal'], goal)
+        self.assertEqual(result['conversation']['stop_reason'], 'max_turns_reached')
+
+    def test_normalized_goal_validation_and_empty_goal_termination(self):
+        for goal in ('An objective', {'Alice': 'An objective'}, None, {}):
+            normalized = goals.normalize(goal)
+            statuses = {key: 'Achieved' for key in normalized}
+            self.assertEqual(goals.achieved(normalized, statuses), bool(normalized))
+        valid = {'narration': '', 'current_situation': 'Cafe', 'progress': {'common': 'Approaching'},
+                 'progress_reason': {'common': 'Drafting has started; approval is still missing.'}}
+        validation.update(valid, {'common': 'Submit the report and obtain approval.'})
+        for bad_progress, bad_reason in (({}, {}), ({'wrong': 'Achieved'}, {'wrong': 'Done'}),
+                                         ({'common': 'Achieved'}, {'common': ''}),
+                                         ({'common': []}, {'common': 'Done'}),
+                                         ('Achieved', 'Done')):
+            with self.subTest(progress=bad_progress), self.assertRaises(ValueError):
+                validation.update({**valid, 'progress': bad_progress, 'progress_reason': bad_reason},
+                                  {'common': 'Submit the report and obtain approval.'})

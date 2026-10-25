@@ -127,16 +127,13 @@ class MockClient:
         if 'non_participants' in schema['properties']:
             participants = {c['name'] for c in data['characters']}
             absent = sorted(set(data.get('mentioned_non_participants', [])) - participants)
-            return {'situation': data['situation'], 'goal': data.get('goal') or '', 'non_participants': absent,
+            return {'situation': data['situation'], 'non_participants': absent,
                     'beginning_narration': '放課後の静かなカフェで、二人は向かい合って座っていた。'}
         if 'progress' in schema['properties']:
             number = data.get('completed_turns', len(data['history'])) + 1
             names = [c['name'] for c in data['characters']]
-            progress = 'Achieved' if data['goal'] and number >= 3 else ('Approaching' if data['goal'] else 'Unchanged')
-            reason = 'Mock fixture reaches its goal at turn three.' if data['goal'] else 'No goal supplied.'
-            if isinstance(data['goal'], dict):
-                progress = {name: 'Achieved' if number >= 3 else 'Approaching' for name in data['goal']}
-                reason = {name: 'Mock fixture reaches its goal at turn three.' for name in data['goal']}
+            progress = {key: 'Achieved' if number >= 3 else 'Approaching' for key in data['goals']}
+            reason = {key: 'Mock fixture reaches its goal at turn three.' for key in data['goals']}
             return {
                 'narration': '静かな店内で、会話が続いた。',
                 'current_situation': 'The participants are talking in the cafe.',

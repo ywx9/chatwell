@@ -1,0 +1,2 @@
+Scene context: continuing conversation with full history
+Read beginning_narration followed by the complete chronological history to infer the present situation. The history has ALREADY happened. Continue after its last turn and react naturally to the latest exchange; do not restart the meeting or repeat an earlier greeting. Even if this is your own first turn, the preceding turns are established events. History contains only your own previous thoughts; other participants' thoughts are not supplied. Its narration is the definitive public account of the actions.

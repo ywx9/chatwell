@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import prompts, validation
+from . import goals, prompts, validation
 from .history import character_input, character_history, recent_turns, scene_context
 from .compression import compress
 from .speakers import DEFAULT_MAX_TURNS, RECOMMENDATION_THRESHOLD, select_speaker, candidates
@@ -29,6 +29,8 @@ def run(config, characters, client, output_dir, observer=None, *,
             or not math.isfinite(recommendation_threshold) or not 0 <= recommendation_threshold <= 1):
         raise ValueError('recommendation_threshold must be in [0, 1]')
     config, characters = copy.deepcopy(config), copy.deepcopy(characters)
+    requested_goal = copy.deepcopy(config.get('goal', ''))
+    objectives = goals.normalize(requested_goal)
     conversation = {'situation': '', 'goal': '', 'non_participants': [], 'beginning_narration': '',
                     'turns': [], 'ending_narration': '', 'stop_reason': ''}
     options = {'temperature': 0.8, 'max_tokens': getattr(client, 'default_max_tokens', 6144), **config.get('llm_config', {})}
@@ -92,26 +94,24 @@ def run(config, characters, client, output_dir, observer=None, *,
         if hasattr(client, 'probe_metadata'):
             session['runtime']['server'] = client.probe_metadata()
         names = [c['name'] for c in characters]
-        # Only common goals need goal refinement during initial scene generation.
-        # Individual goals remain verbatim; each actor sees only their own goal.
-        input_goal = config.get('goal')
-        data = {'situation': config['situation'], 'goal': input_goal if isinstance(input_goal, str) else None, 'language': config['language'],
+        # Scene generation never owns or rewrites the requested objectives.
+        data = {'situation': config['situation'], 'language': config['language'],
                 'characters': [{k: c[k] for k in ('name', 'profile')} for c in characters],
                 'mentioned_non_participants': sorted({n for c in characters for n in c['relationships']} - {c['name'] for c in characters}),
                 'coordinator': copy.deepcopy(config.get('coordinator', {}))}
         initial = complete('initializing', prompts.messages('coordinator', data), prompts.INITIAL_SCHEMA)
         conversation['pending_initialization'] = copy.deepcopy(initial)
         persist('Starting')
+        # Ignore a legacy goal field from a server that did not honor the scene-only schema.
+        # It has no authority over the objectives supplied by the caller.
+        initial = copy.deepcopy(initial)
+        if isinstance(initial, dict):
+            initial.pop('goal', None)
         validation.initialization(initial)
         if set(names).intersection(initial['non_participants']):
             raise ValueError('Coordinator classified a participant as absent')
-        if isinstance(config.get('goal'), str):
-            validation.text(initial['goal'], 'refined goal')
-        elif initial['goal']:
-            raise ValueError('Coordinator invented an unspecified common goal')
         conversation.update(copy.deepcopy(initial))
-        if isinstance(config.get('goal'), dict):
-            conversation['goal'] = copy.deepcopy(config['goal'])
+        conversation['goal'] = copy.deepcopy(requested_goal)
         conversation['non_participants'] = sorted(set(initial['non_participants']) |
                                                 ({n for c in characters for n in c['relationships']} - set(names)))
         calls['initializing']['output'] = {key: copy.deepcopy(conversation[key]) for key in ('situation', 'goal', 'non_participants', 'beginning_narration')}
@@ -131,7 +131,7 @@ def run(config, characters, client, output_dir, observer=None, *,
             # Coordinator sees only public character fields and public history.
             # Common goals are evaluation-only; each actor receives only their assigned individual goal.
             data = {**scene_context(conversation),
-                    'goal': conversation['goal'], 'non_participants': list(conversation['non_participants'])}
+                    'goals': copy.deepcopy(objectives), 'non_participants': list(conversation['non_participants'])}
             data.update(language=config['language'], coordinator=copy.deepcopy(config.get('coordinator', {})),
                         characters=[{k: c[k] for k in ('name', 'profile')} for c in characters],
                         history=character_history(recent_turns(conversation), None),
@@ -146,12 +146,13 @@ def run(config, characters, client, output_dir, observer=None, *,
                 'preceding_messages': public_history[-7:],
                 'completed_message': {k: original[k] for k in ('name', 'speech', 'narration', 'expression')},
             }
-            schema = prompts.update_schema(eligible,
-                    list(conversation['goal']) if isinstance(conversation['goal'], dict) else None)
+            schema = prompts.update_schema(eligible, objectives)
             revised = complete(f'coordinator:{index}', prompts.messages('update', data), schema)
             conversation['pending_turn']['coordinator'] = copy.deepcopy(revised)
             persist('Running')
-            validation.update(revised, conversation['goal'])
+            validation.update(revised, objectives)
+            goal_achieved = goals.achieved(objectives, revised['progress'])
+            revised = goals.stored_update(revised, requested_goal)
             # Missing recommendation fields use neutral fallback values.
             revised = copy.deepcopy(revised)
             recommendation = revised.setdefault('speaker_recommendation', {})
@@ -168,10 +169,7 @@ def run(config, characters, client, output_dir, observer=None, *,
             if measured and max(measured) > context_size - options['max_tokens']:
                 if compress(conversation, characters, complete, index, max(measured)):
                     persist('Running')
-            goal = conversation['goal']
-            if (isinstance(goal, str) and goal and revised['progress'] == 'Achieved') or (
-                    isinstance(goal, dict) and goal and
-                    all(revised['progress'].get(name) == 'Achieved' for name in goal)):
+            if goal_achieved:
                 conversation['stop_reason'] = 'goal_achieved'
                 break
             if len(conversation['turns']) < max_turns:

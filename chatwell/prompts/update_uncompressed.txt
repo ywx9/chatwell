@@ -1,0 +1,2 @@
+Public context: before history compression
+Read beginning_narration followed by history in chronological order, then assess the separate character input as the latest turn. history contains all previously confirmed turns. If history is empty, this is the update AFTER the first character turn, not initialization before the conversation. Do not replay the opening scene or generate the first utterance again.

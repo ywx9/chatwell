@@ -52,7 +52,7 @@ HTTP APIの受付・指定ターン取得については [HTTP API仕様](http-a
 
 未実行のinitialization/endingはnull。実行中のoutputはnull。各呼出しのmetricsは `started/ended/duration_ms/prompt_tokens/completion_tokens/finish_reason`。所要時間は単調時計で計測し、サーバーから得られないトークン数等はnullにします。各呼出しは応答のモデルIDが取得できれば `model` も記録します。API失敗時も時間とエラー種別を残します。
 
-initialization.outputは `situation/goal/non_participants/beginning_narration`。非参加者は関係設定のキーから抽出した名前の一覧でも補完します。初期化LLMに関係説明本文は渡しません。個別目標の場合、保存時のgoalは入力オブジェクトをそのまま保持します。
+initialization.outputは `situation/goal/non_participants/beginning_narration`。初期化LLMが生成するのは `situation/non_participants/beginning_narration` の3項目だけです。共通・個人のどちらの目標も初期化LLMへ渡さず、保存時のgoalはアプリが入力値をそのまま設定します。目標省略時は空文字です。旧形式のgoalを余分に返すサーバーでも、その値は採用しません。非参加者は関係設定のキーから抽出した名前の一覧でも補完します。初期化LLMに関係説明本文は渡しません。
 
 character.outputは `name/speech/thought/narration/expression`。nameはアプリが補います。speechは言葉だけでなく、本人が発する吐息・ため息・笑い声・キスの音なども含み、音声だけの出力も許可します。音自体はspeech、動作の説明はnarration、声に出さない内心はthoughtに記します。音声は状況に自然に伴う場合だけ使い、他者の行動・反応は確定しません。
 
@@ -74,7 +74,23 @@ ending.outputは `ending_narration`。圧縮が発生しない場合、正常終
 
 profileは他者に渡す公開説明、personaは本人の自覚・振舞いです。自分のprofileはsystemとuserのどちらにも直接渡しません。参加者一覧には自分の名前だけを含め、他者にはnameとprofileを含めます。自分のpersona・口調・関係性などの人物設定はsystemに配置し、状況・他者の公開紹介・履歴はuserメッセージの構造化JSONに保持します。人物設定はアプリの出力形式・場面制約を上書きしません。
 
+人物の入力と場面の読み方の指示は、会話全体の最初のターン・圧縮前の継続・圧縮後の継続の3段階に分けます。共通ルールは `chatwell/prompts/character.txt`、段階別の指示は `character_initial.txt`・`character_continuing.txt`・`character_compressed.txt` です。systemは共通ルール→該当段階の指示→本人の人物設定の順に組み立て、LLM呼び出しと応答検証は共通処理を使います。
+
+最初のターンはbeginning_narrationと空のhistoryを渡し、描写の直後から発言・行動を始めます。圧縮前の継続ではbeginning_narrationと全履歴を渡します。ある人物の初発言でも、会話全体に履歴があれば継続です。圧縮後はmemory・本人のprivate_memory・未圧縮履歴を渡し、beginning_narrationを重複して渡しません。圧縮の有無を先に判定するため、未圧縮履歴が空でも最初のターンには戻りません。
+
+共通ルールは役割と指示の優先関係、人物と個人目標、知識・行動の範囲、出力、会話のテンポに整理しています。人物設定は組み合わせて解釈し、個人別の呼称指定があれば通常の呼称より優先します。個人目標はpersona・関係性・確立した場面の範囲で追求し、それらを上書きしません。thoughtはその時点での本人の内心・解釈・意図、narrationは観察可能な動作など、expressionは本人の見える表情を短く記します。内心が特になければthoughtは空文字にでき、各発言の説明は必須ではありません。これらは生成指示であり、意味上の整合性を機械的に保証する制約ではありません。
+
 Coordinatorは確定済みの発言・行動だけから地の文と現在状況を更新し、次の人物の返答・提案・決定を追加しないよう指示します。Coordinatorにとってgoalは評価専用で、出来事の生成を誘導する根拠にしません。個別目標を持つ人物は自分の目標を行動の動機にできます。話者推薦はspeaker_contextにある候補、公開された直近履歴、直前の人物出力だけを根拠とします。明確な呼びかけ・質問先を高く評価し、単なる言及や全体への問いは低く評価します。これらの意味上の制約はプロンプトによるもので、生成内容の完全な自動検証は行いません。
+
+更新用systemは、共通指示 `chatwell/prompts/update.txt` に、圧縮前後に応じた `update_uncompressed.txt` または `update_compressed.txt` を追加します。評価対象があれば共通の `update_evaluation.txt`、なければ `update_no_goals.txt` を追加し、共通目標・個人目標によって判定指示を変えません。各ターンのLLM呼び出し数は従来どおりです。話者推薦は引き続き同じ更新呼び出し内で行い、利用する情報の範囲を指示で制限しています。
+
+内部では目標を評価キー→目標文のオブジェクトへ統一します。共通目標は `{"common": "目標文"}`、個人目標は指定された人物名→目標文、目標なしは空オブジェクトです。更新LLMの入力は `goals`、出力のprogressとprogress_reasonは同じ評価キーを持つオブジェクトで、検証と全目標の達成判定も同じ処理を使います。保存・API出力では従来の形式に戻すため、共通目標のprogressと理由は文字列、個人目標では人物別オブジェクトです。目標省略時はUnchangedと目標なしの理由をアプリが設定します。目標なしでは終了判定を成立させません。人物へ目標を渡す範囲は従来どおりです。
+
+更新入力のhistoryは今回より前の確定ターンだけで、characterはまだ履歴に含まれていない今回の出力です。completed_turnsは前の確定ターン数、入力current_situationは更新前の要約、出力current_situationは今回を反映した更新後の要約です。最初の更新も最初のcharacter出力の後に行います。圧縮後はmemory→未圧縮history→今回のcharacterの順に評価し、historyが空でも初期化には戻りません。内部要約に公開記録で裏付けられない内容があれば、公開記録を優先します。
+
+character.narrationは確認対象の草稿として扱います。他者の未確定の行動や反応、内心、既存履歴との矛盾、予定を実行済みにした記述を除き、本人の成立する観察可能な動作などを残します。削除箇所を新しい出来事で補わず、発言・表情は変更しません。必要な描写がなければ空文字を返せます。削除した内容をcurrent_situationで復活させたり、自ら追加した出来事を進捗の根拠にしたりしないよう指示します。
+
+progressは、目標未達の場合の前状態からの変化をApproaching・Unchanged・Divergingで表し、目標全体が実際に成立した場合だけAchievedとします。提案や準備はApproachingの根拠になり得ますが、達成の証拠にはしません。複数の必須条件がある目標は全条件の成立が必要で、最初の一歩や部分的成功では未達です。一方、指定されていない条件を追加しません。理由には公開記録上の根拠と未達条件を記します。「週末に出かける約束をする」は相互の合意で達成できますが、「週末に出かける」は約束だけでは達成しません。これらの判定は生成指示であり、意味上の正しさはモデルに依存します。
 
 ## 履歴圧縮
 

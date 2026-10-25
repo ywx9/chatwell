@@ -1,0 +1,2 @@
+Public context: after history compression
+memory.facts is the cumulative chronological public summary of the initial scene and confirmed turns through memory.through_turn. history contains only later, uncompressed confirmed turns. Read memory followed by history, then assess the separate character input as the latest turn. A short or empty history does not restart the conversation. Do not reconstruct or invent missing dialogue. The summary is public information, not private memory.

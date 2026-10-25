@@ -1,0 +1,2 @@
+Progress
+goals is empty. Return empty objects for progress and progress_reason. Do not infer objectives from the scene or profiles.
