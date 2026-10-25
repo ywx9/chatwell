@@ -25,7 +25,35 @@ HTTP APIの受付・指定ターン取得については [HTTP API仕様](http-a
 
 `characters` は1人以上で、各人物は `name/profile/persona/speech/relationships` を持ちます。speechは `first_person/second_person/default_address/style`、relationshipsは人物名→関係の説明です。人物名は重複できず、先頭の人物が最初に話します。
 
-## セッションJSON（schema_version: 1.0）
+## ログと会話本文
+
+生成を開始すると、セッションJSONと同じ名前の `.log` と `.txt` を作成します。両ファイルはUTF-8・LFで、追記だけを行います。書き込みごとにflush・fsyncを行います。未着手のQueuedセッションではまだ作成しません。
+
+`.log` の先頭には入力内容をJSONで記録します。元の空白・改行を保持するものではありません。以降は時刻付きのテキストで、実効設定、状態遷移、各呼び出しの出力・メトリクス・モデル、圧縮、エラーなどの変更内容を発生順に追記します。項目は `conversation.pending_turn.character.output.speech: ...` のようにパスで識別します。未検証の受信結果も記録し、確定時の補完・修正や一時項目の削除は後続の記録に残します。削除は `(removed)` と記します。Workerの中断検出・復旧による終了状態も追記します。
+
+`.txt` は次の形式です。
+
+```text
+Opening: 開始の描写
+
+Name: 人物名
+Expression: 表情
+Speech: 発言
+Thought: 内心
+Narration: Coordinatorが確定した地の文
+
+Name: 次の人物名
+Expression: 表情
+Speech: 発言
+Thought:
+Narration: Coordinatorが確定した地の文
+
+Ending: 締めの描写
+```
+
+値が複数行なら2行目以降の先頭に半角スペース2個を加えます。空の項目もラベルを残します。Openingは初期化の検証後、各ターンはCharacter・Coordinator両方の検証後、Endingは締めの検証後に追記します。Characterの地の文の草稿はログにだけ残します。途中失敗では確定済みの本文を保持し、締めの失敗ではEndingを省略します。異常終了時には末尾の書き込みが途切れる場合があります。内部JSON・ログ・本文の3ファイルをまとめて更新するトランザクションではないため、プロセスの強制終了時にファイル間の末尾が一致する保証はありません。自動的な本文の再生成・再追記は行いません。
+
+## 内部セッションJSON（schema_version: 1.0）
 
 - `schema_version`: 保存形式のバージョン。Chatwellのバージョンとは別管理。
 - `chatwell_version`: 生成に使ったアプリのバージョン。

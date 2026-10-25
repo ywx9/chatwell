@@ -12,6 +12,7 @@ from .speakers import DEFAULT_MAX_TURNS, RECOMMENDATION_THRESHOLD, select_speake
 from .storage import save, read_json
 from .records import new_session, encode, model_id
 from .client import MockClient
+from .transcript import Transcript
 
 
 def now():
@@ -50,6 +51,7 @@ def run(config, characters, client, output_dir, observer=None, *,
                           'server': copy.deepcopy(getattr(client, 'provenance', {'management': 'external', 'llama_cpp_version': None,
                                                                               'model_file': None, 'model_sha256': None})),
                           'requested_model': model_id(getattr(client, 'model', None)), 'response_model': None}
+    transcript = Transcript(path, config, characters)
 
     def persist(status):
         session['status'] = status
@@ -57,7 +59,9 @@ def run(config, characters, client, output_dir, observer=None, *,
         session['progress']['completed_turns'] = len(conversation['turns'])
         if status in ('Ended', 'Failed'):
             session['progress']['phase'] = status.lower()
-        save(path, encode(session, calls))
+        record = encode(session, calls)
+        save(path, record)
+        transcript.record(record)
         logging.info('%s turns=%d %s', status, len(conversation['turns']), path)
         if observer:
             observer(path)
@@ -117,6 +121,7 @@ def run(config, characters, client, output_dir, observer=None, *,
         calls['initializing']['output'] = {key: copy.deepcopy(conversation[key]) for key in ('situation', 'goal', 'non_participants', 'beginning_narration')}
         del conversation['pending_initialization']
         persist('Running')
+        transcript.opening(conversation['beginning_narration'])
         speaker = characters[0]
         for index in range(max_turns):
             data = character_input(conversation, speaker, characters, config['language'])
@@ -162,6 +167,7 @@ def run(config, characters, client, output_dir, observer=None, *,
             conversation['turns'].append({'character': original, **revised})
             del conversation['pending_turn']
             persist('Running')
+            transcript.turn(original, revised['narration'])
             logging.info('Turn %d speaker=%s progress=%s', len(conversation['turns']), speaker['name'], revised['progress'])
             measured = [calls[f'{stage}:{index}']['metrics'].get('prompt_tokens')
                         for stage in ('character', 'coordinator')]
@@ -203,6 +209,7 @@ def run(config, characters, client, output_dir, observer=None, *,
         validation.ending(closing)
         conversation['ending_narration'] = closing['ending_narration']
         del conversation['pending_ending']
+        transcript.ending(conversation['ending_narration'])
     except (Exception, KeyboardInterrupt) as error:
         conversation['ending_error'] = ('user_interrupted' if isinstance(error, KeyboardInterrupt)
                                         else f'{type(error).__name__}: {error}')

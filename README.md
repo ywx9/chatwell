@@ -64,7 +64,7 @@ python3 tools/enqueue.py --input samples/input.json
 
 思考予算は入力JSONの `config.llm_config.reasoning_budget_tokens` で指定できます（例：`2048`）。各LLM呼び出しにそのまま送信します。
 
-入力例は [samples/input.json](samples/input.json)、保存結果の実例は [samples/output.json](samples/output.json) です。入力例はそのまま登録でき、コピーして人物・状況・生成設定をカスタマイズできます。出力例は11ターンで目標を達成した実行記録です。保存時のバージョン表記は`0.3.1`で、履歴圧縮は発生していません。実行時の記録をそのまま保持しています。
+入力例は [samples/input.json](samples/input.json)、会話本文は [samples/output.txt](samples/output.txt)、ログの形式例は [samples/output.log](samples/output.log) です。入力例はそのまま登録でき、コピーして人物・状況・生成設定をカスタマイズできます。本文・ログの例は [samples/output.json](samples/output.json) の保存記録から変換したものです。ログの例は最終状態を一括で記載していますが、実行時は処理の進行に合わせて変更内容を追記します。
 
 詳細は [HTTP API仕様](docs/http-api.md)、[入出力仕様](docs/input-output.md) を参照してください。
 
@@ -94,7 +94,7 @@ python tools/run.py --settings /path/to/settings.env --data-dir /path/to/data --
 python tools/run.py --help
 ```
 
-会話は `data/sessions/`、内部Queueは `data/.runtime/queue/`、生のLLM応答は `data/debug/` に保存します。同じ保存先の二重起動は拒否します。
+会話は `data/sessions/` に、同じ名前の `.log`（実行ログ）と `.txt`（会話本文）で保存します。どちらも追記のみで、生成済みの内容を書き直しません。API参照用の内部JSONも同じ場所に保持します。内部Queueは `data/.runtime/queue/`、生のLLM応答は `data/debug/` に保存します。同じ保存先の二重起動は拒否します。
 
 旧設定の `CHATWELL_ENDPOINT` は `LLM_ENDPOINT` に、ほかのLLM関連の `CHATWELL_*` は `LLM_*` に変更してください。Chatwell側の認証設定、旧CLIと起動管理用tools、別プロセスworker、LLM起動補助は廃止しています。既存の保存先を使う場合は `--data-dir .` などで指定してください。
 

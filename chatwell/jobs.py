@@ -8,6 +8,7 @@ from . import validation
 from .speakers import DEFAULT_MAX_TURNS
 from .storage import read_json, save
 from .records import new_session
+from .transcript import log_event
 
 ROOT = Path.cwd()
 QUEUE = ROOT / '.runtime' / 'queue'
@@ -80,6 +81,8 @@ def process_job(path, client, settings, runner=None):
                 session['progress'] = {'phase': 'failed', 'completed_turns': len(session['conversation']['turns'])}
                 session['conversation']['stop_reason'] = job.get('error') or 'worker_interrupted'
                 save(job['session_path'], session)
+                log_event(job['session_path'], 'Worker stopped', {
+                    'status': session['status'], 'stop_reason': session['conversation']['stop_reason']})
         save(path, job)
 
 
@@ -108,6 +111,9 @@ def recover():
                         else:
                             conversation['stop_reason'] = 'worker_interrupted'
                         save(session_path, session)
+                        log_event(session_path, 'Worker recovery', {
+                            'status': session['status'], 'stop_reason': conversation['stop_reason'],
+                            'ending_error': conversation.get('ending_error')})
                     elif session['status'] == 'Ended':
                         # The session may have committed just before the worker crashed.
                         job.update(status='Ended', error=None)

@@ -60,7 +60,8 @@ class SessionTests(unittest.TestCase):
         self.assertIsNotNone(result['timestamps']['ended'])
         self.characters[0]['name'] = 'Changed'
         self.assertEqual(result['characters'][0]['name'], 'Alice')
-        self.assertEqual(len(list(Path(self.temp.name).iterdir())), 1)
+        self.assertEqual(set(Path(self.temp.name).iterdir()),
+                         {path, path.with_suffix('.log'), path.with_suffix('.txt')})
 
     def test_failures_are_finalized(self):
         for error in (TimeoutError('timeout'), ValueError('bad JSON'), ConnectionRefusedError('offline')):
