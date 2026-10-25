@@ -116,7 +116,7 @@ class MockClient:
         if set(schema['properties']) == {'facts'}:
             facts = list(data['previous_facts'])
             if 'initial_scene' in data:
-                facts.append(data['initial_scene']['situation'])
+                facts.append(data['initial_scene']['beginning_narration'])
             for turn in data.get('turns', []):
                 facts.append(f"Turn {turn['index']}: {turn['name']} said {turn['speech']}")
             for thought in data.get('thoughts', []):
@@ -126,17 +126,22 @@ class MockClient:
             return {'ending_narration': '窓辺の柔らかな光の中、二人を包む穏やかな時間が流れていた。'}
         if 'non_participants' in schema['properties']:
             participants = {c['name'] for c in data['characters']}
-            absent = sorted({n for c in data['characters'] for n in c['relationships']} - participants)
+            absent = sorted(set(data.get('mentioned_non_participants', [])) - participants)
             return {'situation': data['situation'], 'goal': data.get('goal') or '', 'non_participants': absent,
                     'beginning_narration': '放課後の静かなカフェで、二人は向かい合って座っていた。'}
         if 'progress' in schema['properties']:
             number = data.get('completed_turns', len(data['history'])) + 1
             names = [c['name'] for c in data['characters']]
+            progress = 'Achieved' if data['goal'] and number >= 3 else ('Approaching' if data['goal'] else 'Unchanged')
+            reason = 'Mock fixture reaches its goal at turn three.' if data['goal'] else 'No goal supplied.'
+            if isinstance(data['goal'], dict):
+                progress = {name: 'Achieved' if number >= 3 else 'Approaching' for name in data['goal']}
+                reason = {name: 'Mock fixture reaches its goal at turn three.' for name in data['goal']}
             return {
                 'narration': '静かな店内で、会話が続いた。',
                 'current_situation': 'The participants are talking in the cafe.',
-                'progress': 'Achieved' if data['goal'] and number >= 3 else ('Approaching' if data['goal'] else 'Unchanged'),
-                'progress_reason': 'Mock fixture reaches its goal at turn three.' if data['goal'] else 'No goal supplied.',
+                'progress': progress,
+                'progress_reason': reason,
                 'speaker_recommendation': {'name': data.get('speaker_context', {}).get('candidates', names)[0], 'confidence': 0.9 if number % 2 else 0.2},
             }
         if schema:

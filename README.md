@@ -60,6 +60,8 @@ python3 tools/enqueue.py --input samples/input.json
 
 ターン取得は確定済みなら200、生成中で未確定なら202、終了後に存在しなければ404です。取得後も生成は続きます。
 
+目標は `config.goal` に共通の文字列、または `{"人物名": "その人物の目標"}` を指定できます。個別目標は本人とCoordinatorだけへ渡し、指定された全員の達成で終了します。
+
 思考予算は入力JSONの `config.llm_config.reasoning_budget_tokens` で指定できます（例：`2048`）。各LLM呼び出しにそのまま送信します。
 
 入力例は [samples/input.json](samples/input.json)、保存結果の実例は [samples/output.json](samples/output.json) です。入力例はそのまま登録でき、コピーして人物・状況・生成設定をカスタマイズできます。出力例は11ターンで目標を達成した実行記録です。保存時のバージョン表記は`0.3.1`で、履歴圧縮は発生していません。実行時の記録をそのまま保持しています。

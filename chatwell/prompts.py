@@ -31,8 +31,8 @@ TURN_SCHEMA = {
 PROGRESS = ('Approaching', 'Unchanged', 'Diverging', 'Achieved')
 
 
-def update_schema(names):
-    return {
+def update_schema(names, goal_names=None):
+    schema = {
         'type': 'object',
         'properties': {
             'narration': {'type': 'string'},
@@ -52,6 +52,19 @@ def update_schema(names):
         'required': ['narration', 'current_situation', 'progress', 'progress_reason', 'speaker_recommendation'],
         'additionalProperties': False,
     }
+    if goal_names is not None:
+        keys = list(goal_names)
+        schema['properties']['progress'] = {
+            'type': 'object',
+            'properties': {name: {'type': 'string', 'enum': list(PROGRESS)} for name in keys},
+            'required': keys, 'additionalProperties': False,
+        }
+        schema['properties']['progress_reason'] = {
+            'type': 'object',
+            'properties': {name: {'type': 'string'} for name in keys},
+            'required': keys, 'additionalProperties': False,
+        }
+    return schema
 
 
 def messages(stage, data):

@@ -6,7 +6,7 @@ HTTP APIの受付・指定ターン取得については [HTTP API仕様](http-a
 
 `samples/input.json` が共通入力です。トップレベルは `config` と `characters`。未知のキーは拒否します。
 
-`config` は必須の `language/situation` と、任意の `goal/max_turns/llm_config/coordinator` を持ちます。max_turnsは1以上の整数で、入力で省略した場合は12です。goalはCoordinatorだけに渡します。
+`config` は必須の `language/situation` と、任意の `goal/max_turns/llm_config/coordinator` を持ちます。max_turnsは1以上の整数で、入力で省略した場合は12です。goalは共通目標の文字列、または参加者名→個別目標のオブジェクトです。共通目標はCoordinatorだけに渡し、個別目標は本人とCoordinatorにだけ渡します。未知の参加者名・空の目標文字列は拒否します。部分的な指定も可能で、空オブジェクトは目標なしとして扱います。
 
 `llm_config` は `temperature/max_tokens/top_p/top_k/min_p/seed/repeat_penalty/reasoning_budget_tokens`。temperatureの既定は0.8、max_tokensの既定は共通設定の6144で、入力指定が優先します。`coordinator.narration_style` は描写方針です。
 
@@ -52,11 +52,11 @@ HTTP APIの受付・指定ターン取得については [HTTP API仕様](http-a
 
 未実行のinitialization/endingはnull。実行中のoutputはnull。各呼出しのmetricsは `started/ended/duration_ms/prompt_tokens/completion_tokens/finish_reason`。所要時間は単調時計で計測し、サーバーから得られないトークン数等はnullにします。各呼出しは応答のモデルIDが取得できれば `model` も記録します。API失敗時も時間とエラー種別を残します。
 
-initialization.outputは `situation/goal/non_participants/beginning_narration`。非参加者は入力の関係情報も使って補完します。
+initialization.outputは `situation/goal/non_participants/beginning_narration`。非参加者は関係設定のキーから抽出した名前の一覧でも補完します。初期化LLMに関係説明本文は渡しません。個別目標の場合、保存時のgoalは入力オブジェクトをそのまま保持します。
 
 character.outputは `name/speech/thought/narration/expression`。nameはアプリが補います。speechは言葉だけでなく、本人が発する吐息・ため息・笑い声・キスの音なども含み、音声だけの出力も許可します。音自体はspeech、動作の説明はnarration、声に出さない内心はthoughtに記します。音声は状況に自然に伴う場合だけ使い、他者の行動・反応は確定しません。
 
-coordinator.outputは `narration/current_situation/progress/progress_reason/speaker_recommendation`。省略された推薦は空名・confidence 0に補完します。複数参加者では直前話者を推薦スキーマと選択処理の両方で候補から除外します。有効な推薦がconfidence 0.75以上なら採用します。それ以外は候補内の最少発言回数をm、各人物の回数をnとして、重み1/(1+n-m)の抽選を行います。参加者が一人なら同じ人物が続けます。
+coordinator.outputは `narration/current_situation/progress/progress_reason/speaker_recommendation`。共通目標ではprogressとprogress_reasonは文字列、個別目標では指定された参加者名をキーとするオブジェクトです。個別目標は指定された全員のprogressがAchievedになった時に終了します。空の目標オブジェクトではターン上限まで続きます。省略された推薦は空名・confidence 0に補完します。複数参加者では直前話者を推薦スキーマと選択処理の両方で候補から除外します。有効な推薦がconfidence 0.75以上なら採用します。それ以外は候補内の最少発言回数をm、各人物の回数をnとして、重み1/(1+n-m)の抽選を行います。参加者が一人なら同じ人物が続けます。
 
 ending.outputは `ending_narration`。圧縮が発生しない場合、正常終了時には通常Nターンで `2N+2` 回の生成を行います。圧縮時は公開要約と更新のある人物の内心要約の呼び出しが追加されます。
 
@@ -66,7 +66,7 @@ ending.outputは `ending_narration`。圧縮が発生しない場合、正常終
 
 モデル情報は要求aliasとサーバーが返すIDを区別します。LLMのプロセス管理・GGUFのハッシュ取得は行いません。外部サーバーの任意の/propsが返すbuild_infoをバージョンとして取得し、未対応・取得不能ならnullにします。取得元はserver_propsです。共有メタデータに認証情報・内部URL・モデルの絶対パスは保存しません。
 
-キャラクターには他者のthought/persona、goal、進捗、話者推薦を渡しません。自分のthoughtは保持し、履歴の地の文はCoordinatorの確定版を使います。自由文経由の意味上の漏洩を完全検出する仕組みではありません。
+キャラクターには他者のthought/persona/個別goal、共通goal、進捗、話者推薦を渡しません。開始状況の内部situationとCoordinatorのcurrent_situationも渡さず、公開beginning_narration・履歴・公開要約から状況を判断させます。自分のthoughtは保持し、履歴の地の文はCoordinatorの確定版を使います。自由文経由の意味上の漏洩を完全検出する仕組みではありません。
 
 ## 指示文と会話の進行
 
@@ -74,7 +74,7 @@ ending.outputは `ending_narration`。圧縮が発生しない場合、正常終
 
 profileは他者に渡す公開説明、personaは本人の自覚・振舞いです。自分のprofileはsystemとuserのどちらにも直接渡しません。参加者一覧には自分の名前だけを含め、他者にはnameとprofileを含めます。自分のpersona・口調・関係性などの人物設定はsystemに配置し、状況・他者の公開紹介・履歴はuserメッセージの構造化JSONに保持します。人物設定はアプリの出力形式・場面制約を上書きしません。
 
-Coordinatorは確定済みの発言・行動だけから地の文と現在状況を更新し、次の人物の返答・提案・決定を追加しないよう指示します。goalは評価専用で、出来事の生成を誘導する根拠にしません。話者推薦はspeaker_contextにある候補、公開された直近履歴、直前の人物出力だけを根拠とします。明確な呼びかけ・質問先を高く評価し、単なる言及や全体への問いは低く評価します。これらの意味上の制約はプロンプトによるもので、生成内容の完全な自動検証は行いません。
+Coordinatorは確定済みの発言・行動だけから地の文と現在状況を更新し、次の人物の返答・提案・決定を追加しないよう指示します。Coordinatorにとってgoalは評価専用で、出来事の生成を誘導する根拠にしません。個別目標を持つ人物は自分の目標を行動の動機にできます。話者推薦はspeaker_contextにある候補、公開された直近履歴、直前の人物出力だけを根拠とします。明確な呼びかけ・質問先を高く評価し、単なる言及や全体への問いは低く評価します。これらの意味上の制約はプロンプトによるもので、生成内容の完全な自動検証は行いません。
 
 ## 履歴圧縮
 
@@ -82,9 +82,9 @@ Coordinatorは確定済みの発言・行動だけから地の文と現在状況
 
 既に0〜jを要約済みとし、`k = j + floor((i-j)/2)` までを新しい要約範囲にします。初回のjは-1です。既存要約とターンj+1〜kを統合し、k+1〜iは原文のまま次の呼び出しへ渡します。追加範囲が0ターンならその回は圧縮しません。以後も各ターン終了時に同じ判定を行います。
 
-初回はsituationとbeginning_narrationも公開要約に含めます。公開要約には確定した発言・観察可能な出来事だけを時系列の簡潔な箇条書きとして保持します。人物の内心は公開情報を含まない別リクエストで人物ごとに要約し、他者の内心と混ぜません。新しい内心がない人物の要約はそのまま引き継ぎます。goal、進捗評価、人物設定は要約元に含めません。
+初回は公開beginning_narrationを公開要約に含めます。内部situationは公開要約に含めません。公開要約には確定した発言・観察可能な出来事だけを時系列の簡潔な箇条書きとして保持します。人物の内心は公開情報を含まない別リクエストで人物ごとに要約し、他者の内心と混ぜません。新しい内心がない人物の要約はそのまま引き継ぎます。goal、進捗評価、人物設定は要約元に含めません。
 
-圧縮後の人物入力は公開要約 `memory`、本人の `private_memory`、未圧縮の履歴です。Coordinatorには公開要約と全人物の内心要約、未圧縮履歴を渡します。締めには公開要約と未圧縮の公開履歴だけを渡します。開始状況・冒頭描写を重複して渡しません。最新のcurrent_situationは引き続き渡します。話者選択の発言回数は圧縮前を含む全ターンから数えます。
+圧縮後の人物入力は公開要約 `memory`、本人の `private_memory`、未圧縮の履歴です。Coordinatorには公開要約と未圧縮の公開履歴だけを渡し、persona・thought・private_memory・関係説明本文は渡しません。締めには公開要約と未圧縮の公開履歴だけを渡します。開始状況・冒頭描写を重複して渡しません。current_situationはCoordinator・締めの内部情報として扱い、人物には渡しません。話者選択の発言回数は圧縮前を含む全ターンから数えます。
 
 保存JSONの原文initializationとturnsは削除・書換えしません。圧縮実施後はconversationに以下が追加されます。
 

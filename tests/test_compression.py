@@ -77,7 +77,7 @@ class CompressionTests(unittest.TestCase):
         self.assertEqual(conversation['compression']['through_turn'], 4)
         public_inputs = [data for data in client.summaries if 'turns' in data]
         self.assertIn('initial_scene', public_inputs[0])
-        self.assertIn('beginning_narration', public_inputs[0]['initial_scene'])
+        self.assertEqual(set(public_inputs[0]['initial_scene']), {'beginning_narration'})
         self.assertNotIn('initial_scene', public_inputs[1])
         self.assertEqual(public_inputs[1]['previous_facts'], public_calls[0]['output']['facts'])
         self.assertEqual([t['index'] for t in public_inputs[0]['turns']], [0, 1, 2])
@@ -107,6 +107,8 @@ class CompressionTests(unittest.TestCase):
                     if other['name'] != source['name']:
                         self.assertNotIn('SECRET_' + other['name'], json.dumps(source, ensure_ascii=False))
         self.assertNotIn('SECRET_', json.dumps(memory['public_facts']))
+        self.assertTrue(all('private_memory' not in update for update in client.updates))
+        self.assertTrue(all('thought' not in turn for update in client.updates for turn in update['history']))
         for messages in client.acting:
             data = json.loads(messages[-1]['content'])
             if 'memory' not in data:

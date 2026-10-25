@@ -21,7 +21,7 @@ def recent_turns(conversation):
 def scene_context(conversation):
     memory = conversation.get('compression')
     if memory is None:
-        return {key: conversation[key] for key in ('situation', 'beginning_narration')}
+        return {'beginning_narration': conversation['beginning_narration']}
     return {'memory': {'through_turn': memory['through_turn'],
                        'facts': copy.deepcopy(memory['public_facts'])}}
 
@@ -29,7 +29,6 @@ def scene_context(conversation):
 def character_input(conversation, character, characters, language):
     data = {
         **scene_context(conversation),
-        'current_situation': conversation['turns'][-1]['current_situation'] if conversation['turns'] else conversation['situation'],
         'character': {key: copy.deepcopy(value) for key, value in character.items() if key != 'profile'},
         'participants': [
             {'name': c['name']} if c['name'] == character['name']

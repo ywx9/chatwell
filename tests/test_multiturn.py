@@ -68,7 +68,8 @@ class MultiTurnTests(unittest.TestCase):
                 self.assertNotIn(private, encoded)
             self.assertNotIn('goal', data)
             self.assertEqual(len(data['history']), index)
-            self.assertEqual(data['situation'], 'REFINED_SCENE')
+            self.assertNotIn('situation', data)
+            self.assertNotIn('current_situation', data)
             for participant in data['participants']:
                 self.assertNotIn('persona', participant)
             for historic in data['history']:
@@ -77,10 +78,11 @@ class MultiTurnTests(unittest.TestCase):
                 else:
                     self.assertNotIn('thought', historic)
                 self.assertEqual(historic['narration'], '静かな店内で、会話が続いた。')
-        self.assertEqual(character_calls[1]['current_situation'], conversation['turns'][0]['current_situation'])
+        self.assertNotIn('current_situation', character_calls[1])
         updates = [d for d, s in client.calls if 'progress' in s['properties']]
         self.assertTrue(all(d['goal'] == 'REFINED_GOAL_SECRET' for d in updates))
-        self.assertEqual(updates[1]['history'][0]['character']['thought'], 'PRIVATE_Alice')
+        self.assertNotIn('PRIVATE_Alice', json.dumps(updates))
+        self.assertTrue(all('thought' not in d['character'] and 'private_memory' not in d for d in updates))
         self.assertTrue(any('pending_turn' in s['conversation'] for s in snapshots))
         self.assertTrue(any('pending_initialization' in s['conversation'] for s in snapshots))
         self.assertNotIn('pending_turn', conversation)

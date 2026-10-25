@@ -30,7 +30,7 @@ def compress(conversation, characters, complete, index, prompt_tokens):
     public = [{'index': j + 1 + offset, **turn} for offset, turn in enumerate(public)]
     data = {'previous_facts': previous.get('public_facts', []), 'turns': public}
     if j == -1:
-        data['initial_scene'] = {key: conversation[key] for key in ('situation', 'beginning_narration')}
+        data['initial_scene'] = {'beginning_narration': conversation['beginning_narration']}
     metadata = {'from_turn': j + 1, 'through_turn': k, 'trigger_prompt_tokens': prompt_tokens}
     output = complete(f'compressing_history:{index}:public',
                       prompts.messages('compress_public', data), FACTS_SCHEMA,

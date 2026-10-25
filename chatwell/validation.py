@@ -18,7 +18,15 @@ def request(config, characters):
     for field in ('language', 'situation'):
         text(config[field], field)
     if 'goal' in config:
-        text(config['goal'], 'goal')
+        goal = config['goal']
+        if isinstance(goal, str):
+            text(goal, 'goal')
+        elif isinstance(goal, dict):
+            for name, purpose in goal.items():
+                text(name, 'goal participant')
+                text(purpose, f'goal for {name}')
+        else:
+            raise ValueError('goal must be a nonempty string or a character-to-goal object')
     if 'max_turns' in config:
         value = config['max_turns']
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -61,6 +69,10 @@ def request(config, characters):
         names.append(character['name'])
     if len(set(names)) != len(names):
         raise ValueError('Character names must be unique')
+    if isinstance(config.get('goal'), dict):
+        unknown = set(config['goal']) - set(names)
+        if unknown:
+            raise ValueError(f'Unknown goal participants: {sorted(unknown)}')
 
 
 def initialization(value):
@@ -82,15 +94,29 @@ def turn(value):
             raise ValueError(f'{field} must be a string')
 
 
-def update(value):
+def update(value, goal=None):
     from .prompts import PROGRESS
     keys(value, ('narration', 'current_situation', 'progress', 'progress_reason'), ('speaker_recommendation',))
     if not isinstance(value['narration'], str):
         raise ValueError('narration must be a string')
     text(value['current_situation'], 'current_situation')
-    text(value['progress_reason'], 'progress_reason')
-    if value['progress'] not in PROGRESS:
-        raise ValueError('Invalid progress enum')
+    progress, reason = value['progress'], value['progress_reason']
+    if isinstance(progress, dict):
+        if not isinstance(reason, dict) or set(progress) != set(reason):
+            raise ValueError('Per-character progress and reasons must have matching keys')
+        for name, status in progress.items():
+            if not isinstance(name, str) or status not in PROGRESS:
+                raise ValueError('Invalid per-character progress')
+            text(reason[name], f'progress_reason[{name}]')
+    else:
+        text(reason, 'progress_reason')
+        if progress not in PROGRESS:
+            raise ValueError('Invalid progress enum')
+    if isinstance(goal, dict):
+        if not isinstance(progress, dict) or set(progress) != set(goal):
+            raise ValueError('Progress keys must match the assigned goal participants')
+    elif isinstance(goal, str) and not isinstance(progress, str):
+        raise ValueError('A common goal requires a single progress status')
     recommendation = value.get('speaker_recommendation', {})
     if not isinstance(recommendation, dict):
         raise ValueError('speaker_recommendation must be an object')
